@@ -18,6 +18,8 @@
 
 #include <cstring>
 
+#include "diag.hpp"
+
 namespace nextendo {
 namespace {
 
@@ -109,6 +111,7 @@ void fetch_and_store() {
     socket_config.udp_rx_buf_size = 0x4000;
     socket_config.sb_efficiency = 2;
     socketInitialize(&socket_config);
+    diag("fetch: socket done");
 
     // NOTE: no `sm:` session is opened here. It is held for the overlay's whole
     // lifetime by NextendoOverlay::initServices(), because that is the only
@@ -121,11 +124,13 @@ void fetch_and_store() {
         health_status == 200) {
         result.api_ok = health.data.find("true") != std::string::npos;
     }
+    diag("fetch: health done");
 
     BodySink body;
     long http_status = 0;
     std::string error;
     const CURLcode rc = http_get(kCountsUrl, body, http_status, error);
+    diag("fetch: counts done");
 
     if (rc != CURLE_OK) {
         result.error = error.empty() ? "request failed" : error;
