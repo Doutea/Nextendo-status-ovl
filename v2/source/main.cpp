@@ -1,10 +1,9 @@
-﻿// Nextendo player-count overlay - minimal build.
+// Nextendo player-count overlay - minimal build.
 //
 // Written from scratch against probe-ovl, which is the only overlay in this
 // repository that has never crashed on the target console. Its defining
 // properties are kept exactly:
 //
-//   * initServices() adds only curl's global state; exitServices() does nothing;
 //   * the Gui builds a static list once, in createUI();
 //   * no worker thread, no atexit hook, no list rebuilding;
 //   * the same compiler and linker flags as probe-ovl (no -mtp=soft, no
@@ -14,13 +13,11 @@
 // initScreen() and before anything is drawn, so the numbers are already in hand
 // when the rows are built.
 //
-// On system services: this build calls none of smInitialize(),
-// socketInitialize() or nifmInitialize(). Every revision that called any of them
-// crashed the loader on close, and the log captured from the last one showed the
-// overlay's own code running to completion - so the crash is downstream of the
-// overlay, and the first thing to do is stop perturbing the process hosting it.
-// If the fetch fails without them, the status row shows curl's error text, and a
-// call can be reintroduced one at a time with the cause known.
+// Services are reintroduced one at a time. Version 2.0.0 called none of them and
+// did not crash on exit, which confirmed that the exit crash came from those
+// calls; it showed no data, so name resolution needs at least one. This build
+// adds back only an `sm:` session, held for the overlay's whole lifetime - the
+// one arrangement in which name resolution has ever worked here.
 
 #define TESLA_INIT_IMPL
 #include <tesla.hpp>
@@ -161,20 +158,27 @@ public:
         const Counts counts = fetch();
 
         auto* frame = new tsl::elm::OverlayFrame(
-            "Nextendo \u7f51\u7edc",      // Nextendo 缃戠粶
-            "\u5728\u7ebf\u4eba\u6570");  // 鍦ㄧ嚎浜烘暟
+            "Nextendo \u7f51\u7edc",      // Nextendo 网络
+            "\u5728\u7ebf\u4eba\u6570");  // 在线人数
         auto* list = new tsl::elm::List();
 
-        list->addItem(new tsl::elm::CategoryHeader("\u5f53\u524d\u5728\u7ebf"));  // 褰撳墠鍦ㄧ嚎
+        list->addItem(new tsl::elm::CategoryHeader("\u5f53\u524d\u5728\u7ebf"));  // 当前在线
         list->addItem(new tsl::elm::ListItem(
-            "\u5728\u7ebf\u4eba\u6570",   // 鍦ㄧ嚎浜烘暟
+            "\u5728\u7ebf\u4eba\u6570",   // 在线人数
             counts.ok ? std::to_string(counts.total) : std::string("--")));
 
         // ListItem takes (text, value) only; the faint style is applied after.
-        const std::string status_text =
-            counts.ok ? std::string("\u5df2\u66f4\u65b0")                  // 宸叉洿鏂?                      : (counts.error.empty() ? std::string("\u5931\u8d25")  // 澶辫触
-                                              : counts.error);
-        auto* status = new tsl::elm::ListItem("\u72b6\u6001", status_text);  // 鐘舵€?        status->setValue(status_text, !counts.ok);
+        // The error text is kept in a local so setValue does not need a getter.
+        std::string status_text;
+        if (counts.ok) {
+            status_text = "\u5df2\u66f4\u65b0";  // 已更新
+        } else if (counts.error.empty()) {
+            status_text = "\u5931\u8d25";        // 失败
+        } else {
+            status_text = counts.error;
+        }
+        auto* status = new tsl::elm::ListItem("\u72b6\u6001", status_text);  // 状态
+        status->setValue(status_text, !counts.ok);
         list->addItem(status);
 
         if (counts.ok) {
@@ -185,7 +189,7 @@ public:
             });
 
             list->addItem(new tsl::elm::CategoryHeader(
-                std::string("\u6e38\u620f (") + std::to_string(games.size()) + ")"));  // 娓告垙
+                std::string("\u6e38\u620f (") + std::to_string(games.size()) + ")"));  // 游戏
 
             const std::size_t shown = std::min<std::size_t>(games.size(), 40);
             for (std::size_t i = 0; i < shown; ++i) {
@@ -204,24 +208,23 @@ class NextendoOverlay : public tsl::Overlay {
 public:
     virtual void initServices() override
     {
-        // The only addition to probe-ovl's shape: curl's global state has to be
-        // set up before an easy handle is used. That is library state rather than
-        // a system service, and the diagnostic build that called it closed
-        // cleanly.
+        // 1. curl's global state has to be set up before an easy handle is used.
+        //    That is library state rather than a system service.
         curl_global_init(CURL_GLOBAL_DEFAULT);
-        // An `sm:` session held for the overlay's whole lifetime.
+
+        // 2. An `sm:` session held for the overlay's whole lifetime.
         //
-        // This is the first system service to come back, and it is first because
-        // it is the only arrangement in which name resolution has ever worked on
-        // this console: libnx's sfdnsres resolver initialises lazily on the first
-        // getaddrinfo and needs `sm:` at that moment. Opening a session only
-        // around the request was tried repeatedly and always failed with
-        // "Couldn't resolve host name".
+        //    This is the first system service to come back, because it is the
+        //    only arrangement in which name resolution has ever worked here:
+        //    libnx's sfdnsres resolver initialises lazily on the first
+        //    getaddrinfo and needs `sm:` at that moment. Opening a session only
+        //    around the request was tried repeatedly and always failed with
+        //    "Couldn't resolve host name".
         //
-        // initServices() runs inside libtesla's doWithSmSession, so this takes a
-        // second reference on an already-open session; service guards are
-        // reference counted, so it is additive. It is deliberately never closed -
-        // exitServices() stays empty, exactly as in probe-ovl.
+        //    initServices() runs inside libtesla's doWithSmSession, so this takes
+        //    a second reference on an already-open session; service guards are
+        //    reference counted, so it is additive. It is deliberately never
+        //    closed - exitServices() stays empty.
         smInitialize();
     }
 
