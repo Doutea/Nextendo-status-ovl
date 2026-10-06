@@ -14,6 +14,14 @@
 
 #include <curl/curl.h>
 
+// addrinfo / freeaddrinfo come from newlib's netdb.h, and the socket types from
+// sys/socket.h. They are NOT part of switch.h, which the local stub header had
+// been papering over.
+#include <netdb.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
 #include <cstdio>
 #include <cstring>
 #include <string>
