@@ -26,8 +26,10 @@ export PATH="$DEVKITA64/bin:$DEVKITPRO/tools/bin:$DEVKITPRO/portlibs/switch/bin:
 echo "==> toolchain"
 echo "DEVKITPRO=$DEVKITPRO"
 command -v aarch64-none-elf-gcc
-aarch64-none-elf-gcc --version | head -n 1
-make --version | head -n 1
+# Note: no `| head -n 1` here. With `set -o pipefail`, head exiting early sends
+# SIGPIPE to the producer and the whole script reports 141 for no good reason.
+aarch64-none-elf-gcc --version
+make --version
 command -v elf2nro
 
 # devkitpro/devkita64 already ships switch-dev and switch-portlibs (which
@@ -41,7 +43,20 @@ else
 fi
 
 echo "==> building overlay"
-make -j"$(nproc)"
+# Capture the output and print the tail afterwards: piping make straight into
+# head/tail would again trip pipefail on a build that actually succeeded.
+set +e
+make -j"$(nproc)" 2>&1 | tee /tmp/build.log
+make_status=${PIPESTATUS[0]}
+set -e
+echo "--- last 60 lines of the build ---"
+tail -n 60 /tmp/build.log
+if [ "$make_status" -ne 0 ]; then
+    echo "ERROR: make failed with status $make_status" >&2
+    echo "--- first errors ---" >&2
+    grep -n -m 20 -E 'error:|Error [0-9]|undefined reference|No such file' /tmp/build.log >&2 || true
+    exit "$make_status"
+fi
 
 if [ ! -f nextendo-ovl.ovl ]; then
     echo "ERROR: nextendo-ovl.ovl was not produced" >&2
