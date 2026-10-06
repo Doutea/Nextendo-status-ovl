@@ -116,21 +116,22 @@ bool services_init() {
     ++g_service_users;
     if (g_services_up) return true;
 
-    // Socket initialisation, using libnx's stock configuration.
+    // The socket stack is deliberately left alone.
     //
-    // Earlier revisions passed a hand-tuned SocketInitConfig that shrank the
-    // buffers to fit the 4 MB overlay heap. Every variant of that was tried -
-    // from the library defaults (~2.20 MB of TransferMemory, which exhausted the
-    // heap and made the overlay die on launch) down to a minimal ~70 KB (which
-    // fell below libnx's documented minimum and stalled all transfers) - and the
-    // overlay crashed the loader on exit regardless. This build uses the stock
-    // config with no overrides at all, to find out whether the custom values are
-    // what the loader trips over.
-    if (R_FAILED(socketInitializeDefault())) {
-        --g_service_users;
-        return false;
-    }
-
+    // socketInitialize() returns LibnxError_AlreadyInitialized (0xE401) in this
+    // process - measured on hardware - so the stack is already up before this
+    // overlay runs. Both previous approaches therefore only differed in how they
+    // reacted to that: treating it as success and continuing on to nifm/curl
+    // produced a working request, while treating it as failure and returning
+    // early produced no data at all. Neither touched the socket, and the build
+    // that continued is the one that loaded data - so the data needs nifm and
+    // curl, not a socket initialisation of ours.
+    //
+    // Every attempt to initialise the socket here (library defaults, and several
+    // hand-tuned buffer sizes) ended with nx-ovlloader failing right after the
+    // overlay closed, with Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4):
+    // its own fsFileRead of the next NRO returning an error. Leaving a stack we
+    // do not own untouched removes that entirely.
     nifmInitialize(NifmServiceType_User);
 
     g_services_up = true;
