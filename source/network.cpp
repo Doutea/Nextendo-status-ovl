@@ -1,5 +1,7 @@
 #include "network.hpp"
 
+#include "debug_log.hpp"
+
 #include <curl/curl.h>
 
 #include <cstdio>
@@ -116,6 +118,7 @@ CURLcode get(const char* url, BodySink& sink, long& http_status,
 }  // namespace
 
 bool services_init() {
+    debug_log("services_init");
     ++g_service_users;
     if (g_services_up) return true;
 
@@ -131,7 +134,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with Atmosph猫re fatal 2345-0002.
+    //                  launch with Atmosph鐚玶e fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -192,6 +195,7 @@ bool services_init() {
 }
 
 void services_exit() {
+    debug_log("services_exit");
     if (g_service_users > 0) --g_service_users;
     if (g_service_users > 0 || !g_services_up) return;
 
@@ -210,12 +214,18 @@ FetchJob::~FetchJob() {
 }
 
 void FetchJob::thread_entry(void* self) {
+    debug_log("worker: entered");
     static_cast<FetchJob*>(self)->run();
 }
 
 void FetchJob::start() {
-    if (state_.load(std::memory_order_acquire) == FetchState::Running) return;
+    debug_log("start: begin");
+    if (state_.load(std::memory_order_acquire) == FetchState::Running) {
+        debug_log("start: already running");
+        return;
+    }
     cancel();  // join any finished worker before reusing the object
+    debug_log("start: previous worker joined");
 
     abort_.store(false, std::memory_order_relaxed);
     published_ = FetchOutcome{};
@@ -226,6 +236,7 @@ void FetchJob::start() {
     const Result rc = threadCreate(&thread_, &FetchJob::thread_entry, this, nullptr,
                                    kStackSize, 0x2C, -2);
     if (R_FAILED(rc)) {
+        debug_log("start: threadCreate FAILED");
         FetchOutcome failed;
         failed.state = FetchState::Failed;
         failed.error = "could not start worker thread";
@@ -233,10 +244,12 @@ void FetchJob::start() {
         state_.store(FetchState::Failed, std::memory_order_release);
         return;
     }
+    debug_log("start: threadCreate ok");
 
     thread_created_ = true;
 
     if (R_FAILED(threadStart(&thread_))) {
+        debug_log("start: threadStart FAILED");
         threadClose(&thread_);
         thread_created_ = false;
 
@@ -245,10 +258,13 @@ void FetchJob::start() {
         failed.error = "could not start worker thread";
         published_ = failed;
         state_.store(FetchState::Failed, std::memory_order_release);
+        return;
     }
+    debug_log("start: thread started");
 }
 
 void FetchJob::run() {
+    debug_log("worker: run begin");
     FetchOutcome outcome;
 
     // The `sm:` session that name resolution needs is held open for the whole
@@ -303,6 +319,7 @@ void FetchJob::run() {
     // Release: the store makes every write above visible to a reader that
     // observes Done/Failed with an acquire load.
     state_.store(outcome.state, std::memory_order_release);
+    debug_log("worker: run end");
 }
 
 FetchOutcome FetchJob::result() const {
@@ -310,14 +327,21 @@ FetchOutcome FetchJob::result() const {
 }
 
 void FetchJob::cancel() {
+    debug_log("cancel: begin");
     abort_.store(true, std::memory_order_relaxed);
-    if (!thread_created_) return;
+    if (!thread_created_) {
+        debug_log("cancel: no thread");
+        return;
+    }
 
     // The worker checks the abort flag through curl's progress callback, so the
     // join returns promptly instead of waiting out the transfer timeout.
+    debug_log("cancel: waiting for worker");
     threadWaitForExit(&thread_);
+    debug_log("cancel: worker exited, closing");
     threadClose(&thread_);
     thread_created_ = false;
+    debug_log("cancel: done");
 }
 
 }  // namespace nextendo
