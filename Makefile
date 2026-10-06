@@ -1,12 +1,18 @@
 #---------------------------------------------------------------------------------
-# Nextendo Overlay — player counts for the Nextendo Network, from the Tesla menu.
+# Nextendo Overlay — player counts for the Nextendo Network, from the Ultrahand
+# (or Tesla) overlay menu.
 #
-# An .ovl is nothing more than a libnx homebrew NRO with a different extension,
-# loaded by the nx-ovlloader sysmodule. There is no Atmosphère-specific build
-# step: we link against switch.specs and convert the ELF with elf2nro.
+# An .ovl is a libnx homebrew NRO with a different extension, loaded by the
+# nx-ovlloader sysmodule. There is no Atmosphère-specific build step: we link
+# against switch.specs and convert the ELF with elf2nro.
+#
+# Built on libultrahand (the maintained fork of libtesla, and what Ultrahand
+# Overlay itself is built with), so the result is a first-class Ultrahand
+# overlay. That matters because Ultrahand hides overlays it considers
+# unsupported; the `ULTR` trailer appended below is how it recognises its own.
 #
 # Local build (inside the devkitPro MSYS2 shell):
-#   pacman -S --needed switch-dev switch-curl switch-zlib
+#   pacman -S --needed switch-dev switch-curl switch-zlib switch-minizip switch-mbedtls
 #   make
 #
 # The result is nextendo-ovl.ovl, to copy to sdmc:/switch/.overlays/.
@@ -39,33 +45,39 @@ TARGET		:=	nextendo-ovl
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	include source libs/libtesla/include
+INCLUDES	:=	include source
 
 NO_ICON		:=	1
 NO_NACP		:=	1
 
+# Pulls libultrahand's sources and headers into SOURCES / INCLUDES.
+include $(TOPDIR)/libs/libultrahand/ultrahand.mk
+
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+# NOTE: -mtp=soft is deliberately omitted. It is a devkitA64-specific default
+# that upstream aarch64-none-elf-gcc rejects, and devkitA64 does not need it.
+ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE
 
-CFLAGS	:=	-g -Wall -Wextra -O2 -ffunction-sections \
+CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__
 
-# -fno-rtti is deliberately NOT used: libtesla itself relies on dynamic_cast
-# (tesla.hpp, List::layout), so RTTI has to stay enabled. -fno-exceptions is
-# safe because nothing in the overlay relies on exception handling.
+# -fno-rtti is deliberately NOT used: the vendored libtesla uses dynamic_cast
+# (its List implementation), so RTTI has to stay enabled. -fno-exceptions is
+# safe because nothing here relies on exception handling.
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -std=c++20
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
+			-Wl,--gc-sections
 
-# switch-curl is built by devkitPro with its TLS backend pointed at libnx's own
-# `ssl` service (CURLSSLBACKEND_LIBNX), so it needs no OpenSSL/mbedTLS and no CA
-# bundle of our own. -lz comes from switch-zlib, a dependency of switch-curl.
-LIBS	:= -lcurl -lz -lnx
+# libcurl is built by devkitPro with its TLS backend pointed at libnx's own
+# `ssl` service (CURLSSLBACKEND_LIBNX), so HTTPS needs no CA bundle of our own.
+# The remaining libraries are what libultrahand requires.
+LIBS	:= -lcurl -lz -lminizip -lmbedtls -lmbedx509 -lmbedcrypto -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -147,7 +159,7 @@ ifneq ($(ROMFS),)
 	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: $(BUILD) clean all
+.PHONY: $(BUILD) clean all test dist
 
 #---------------------------------------------------------------------------------
 all: $(BUILD)
@@ -191,10 +203,13 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #---------------------------------------------------------------------------------
 all	:	$(OUTPUT).ovl
 
-# An overlay is an NRO with the .ovl extension, so elf2nro is the whole story.
+# An overlay is an NRO with the .ovl extension. The trailing 'ULTR' marker is
+# appended on purpose: it is the signature Ultrahand looks for to treat the
+# binary as its own, and without it Ultrahand may hide the overlay entirely.
 $(OUTPUT).ovl		:	$(OUTPUT).elf
 	@elf2nro $< $@ $(NROFLAGS)
-	@echo "built ... $(notdir $(OUTPUT).ovl)"
+	@printf 'ULTR' >> $@
+	@echo "built ... $(notdir $(OUTPUT).ovl) (Ultrahand signature appended)"
 
 $(OUTPUT).elf	:	$(OFILES)
 
