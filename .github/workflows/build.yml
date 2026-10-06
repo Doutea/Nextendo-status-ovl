@@ -30,10 +30,9 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
 
-      # Produces nextendo-ovl.ovl plus nextendo-ovl-sd.zip, a ready-to-copy
-      # SD-card layout. The zip is built inside the container on Linux so the
-      # archive entries use forward slashes.
-      - name: Build overlay and SD-card package
+      # Produces nextendo-ovl.ovl. No SD-card zip: the .ovl is copied straight
+      # to sdmc:/switch/.overlays/, so a package would only be an extra step.
+      - name: Build overlay
         run: bash scripts/build.sh
 
       - name: Upload .ovl
@@ -41,13 +40,6 @@ jobs:
         with:
           name: nextendo-ovl
           path: nextendo-ovl.ovl
-          if-no-files-found: error
-
-      - name: Upload SD-card package
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextendo-ovl-sd
-          path: nextendo-ovl-sd.zip
           if-no-files-found: error
 
       # A minimal overlay that draws text and initialises nothing. Used to tell
