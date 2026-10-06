@@ -55,6 +55,11 @@ int progress_callback(void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_of
 bool g_services_up = false;
 int g_service_users = 0;
 
+// True only when this overlay actually brought the socket stack up. If it was
+// already initialised by something else in the same process, the overlay must
+// not tear it down on exit.
+bool g_socket_owned = false;
+
 // A GET tuned for a small JSON document on a console that may be on flaky
 // Wi-Fi. The timeouts are deliberately short: the overlay is modal, so a long
 // hang is worse than an error the user can retry.
@@ -128,12 +133,9 @@ bool services_init() {
     //               -> exhausted the 4 MB overlay heap, the overlay died on
     //                  launch with Atmosphère fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
-    //               -> heap was fine, but every transfer stalled and name
-    //                  resolution failed with "Couldn't resolve host name".
+    //               -> below the threshold, so every transfer stalled.
     //
-    // Anything above the formula's minimum is acceptable; the sizes here give
-    // 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB, which leaves well
-    // over a megabyte of the heap free for libtesla's renderer and fonts.
+    // The sizes here give 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB.
     SocketInitConfig socket_config = *socketGetDefaultInitConfig();
     socket_config.tcp_tx_buf_size = 0x2000;
     socket_config.tcp_rx_buf_size = 0x4000;
@@ -143,13 +145,29 @@ bool services_init() {
     socket_config.udp_rx_buf_size = 0x4000;
     socket_config.sb_efficiency = 2;
 
-    if (R_FAILED(socketInitialize(&socket_config))) {
+    // LibnxError_AlreadyInitialized means the socket stack is already up in this
+    // process, which is success - not a reason to give up. Treating it as a
+    // failure was a bug: it silently disabled networking.
+    //
+    // It must not be "cleaned up" either. libnx's own socketInitialize() calls
+    // socketExit() when its initialisation fails, so a half-finished attempt
+    // could otherwise tear down a working socket stack.
+    //
+    // The comparison uses R_DESCRIPTION: a Result packs the module in the low 9
+    // bits, so a plain R_VALUE() of the whole Result would never equal the bare
+    // error number.
+    const Result socket_rc = socketInitialize(&socket_config);
+    if (R_FAILED(socket_rc) &&
+        R_DESCRIPTION(socket_rc) != LibnxError_AlreadyInitialized) {
         --g_service_users;
         return false;
     }
+    if (R_DESCRIPTION(socket_rc) == LibnxError_AlreadyInitialized) {
+        // Not ours; do not tear it down later.
+        g_socket_owned = false;
+    }
 
-    // Not required for name resolution (that goes through sfdnsres), but it
-    // lets a request fail fast when the console is offline or has no profile.
+    // Optional: name resolution goes through sfdnsres, not nifm.
     nifmInitialize(NifmServiceType_User);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -163,9 +181,30 @@ void services_exit() {
 
     curl_global_cleanup();
     nifmExit();
-    socketExit();
+    // Deliberately no socketExit(): this overlay may not own the socket stack,
+    // and tearing it down would break name resolution for whatever runs next in
+    // the same process.
     g_services_up = false;
 }
+
+// Runs a callable while holding an `sm:` session open.
+//
+// This is what name resolution needs. libtesla's loop() wraps initServices() in
+// doWithSmSession, which CLOSES `sm:` again the moment it returns:
+//
+//     static inline void doWithSmSession(F f) { smInitialize(); f(); smExit(); }
+//
+// libnx's sfdnsres resolver initialises lazily, on the first getaddrinfo, and
+// needs `sm:` at that moment to fetch the service handle. With the session
+// already gone the call fails inside the SM module, which libnx maps to
+// errno = EAGAIN (11); curl then only reports "Couldn't resolve host name".
+template <typename F>
+void with_sm_session(F&& body) {
+    smInitialize();
+    body();
+    smExit();
+}
+
 
 FetchJob::~FetchJob() {
     cancel();
@@ -213,50 +252,55 @@ void FetchJob::start() {
 void FetchJob::run() {
     FetchOutcome outcome;
 
-    // Health first: it is tiny, and a failure here is the clearest signal that
-    // the network (not the stats endpoint) is the problem.
-    BodySink health;
-    long health_status = 0;
-    std::string health_error;
-    const CURLcode health_rc =
-        get(kHealthUrl, health, health_status, abort_, health_error);
-    outcome.health_ok =
-        (health_rc == CURLE_OK && health_status == 200 && health.data.find("true") != std::string::npos);
+    // The whole transfer runs with `sm:` held open. The resolver service
+    // (sfdnsres) initialises on first use and needs the session then; see the
+    // comment on with_sm_session() for why that matters.
+    with_sm_session([&] {
+        // Health first: it is tiny, and a failure here is the clearest signal
+        // that the network (not the stats endpoint) is the problem.
+        BodySink health;
+        long health_status = 0;
+        std::string health_error;
+        const CURLcode health_rc =
+            get(kHealthUrl, health, health_status, abort_, health_error);
+        outcome.health_ok = (health_rc == CURLE_OK && health_status == 200 &&
+                             health.data.find("true") != std::string::npos);
 
-    BodySink body;
-    long http_status = 0;
-    std::string error;
-    const CURLcode rc = get(kCountsUrl, body, http_status, abort_, error);
+        BodySink body;
+        long http_status = 0;
+        std::string error;
+        const CURLcode rc = get(kCountsUrl, body, http_status, abort_, error);
 
-    outcome.http_status = static_cast<int>(http_status);
+        outcome.http_status = static_cast<int>(http_status);
 
-    if (abort_.load(std::memory_order_relaxed)) {
-        outcome.state = FetchState::Failed;
-        outcome.error = "cancelled";
-    } else if (rc != CURLE_OK) {
-        outcome.state = FetchState::Failed;
-        outcome.error = error.empty() ? "network error" : error;
-    } else if (http_status != 200) {
-        outcome.state = FetchState::Failed;
-        outcome.error = "server returned HTTP " + std::to_string(http_status);
-    } else {
-        // Use the std::string overload: passing (data, size) here was matching
-        // the inline overload whose own parameter is also named `body`, which
-        // shadowed the local variable and made the call fail to resolve.
-        switch (parse_online_counts(body.data, outcome.counts)) {
-            case ParseStatus::Ok:
-                outcome.state = FetchState::Done;
-                break;
-            case ParseStatus::Truncated:
-                outcome.state = FetchState::Failed;
-                outcome.error = "truncated response";
-                break;
-            case ParseStatus::Syntax:
-                outcome.state = FetchState::Failed;
-                outcome.error = "unexpected response format";
-                break;
+        if (abort_.load(std::memory_order_relaxed)) {
+            outcome.state = FetchState::Failed;
+            outcome.error = "cancelled";
+        } else if (rc != CURLE_OK) {
+            outcome.state = FetchState::Failed;
+            outcome.error = error.empty() ? "network error" : error;
+        } else if (http_status != 200) {
+            outcome.state = FetchState::Failed;
+            outcome.error = "server returned HTTP " + std::to_string(http_status);
+        } else {
+            // Use the std::string overload: passing (data, size) here matched the
+            // inline overload whose own parameter is also named `body`, which
+            // shadowed the local variable and made the call fail to resolve.
+            switch (parse_online_counts(body.data, outcome.counts)) {
+                case ParseStatus::Ok:
+                    outcome.state = FetchState::Done;
+                    break;
+                case ParseStatus::Truncated:
+                    outcome.state = FetchState::Failed;
+                    outcome.error = "truncated response";
+                    break;
+                case ParseStatus::Syntax:
+                    outcome.state = FetchState::Failed;
+                    outcome.error = "unexpected response format";
+                    break;
+            }
         }
-    }
+    });
 
     published_ = outcome;
     // Release: the store makes every write above visible to a reader that
