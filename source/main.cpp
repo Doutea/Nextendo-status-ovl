@@ -27,19 +27,10 @@ public:
     }
 
     void exitServices() override {
+        // Only the job state is touched here. The service teardown lives in
+        // services_exit(), which is currently a no-op; see the note there.
         g_fetchJob.cancel();
         nextendo::services_exit();
-    }
-
-    void onShow() override {
-        // The transfer runs in GuiMain::createUI(), which libtesla calls after
-        // initScreen() and before the panel is drawn. Fetching here instead was
-        // tried and the panel came up empty, because onShow() runs later than
-        // the Gui's construction.
-    }
-
-    void onHide() override {
-        g_fetchJob.cancel();
     }
 
     std::unique_ptr<tsl::Gui> loadInitialGui() override {
