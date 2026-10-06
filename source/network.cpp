@@ -128,7 +128,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with Atmosph闂佺粯姘ㄩ獮宸?fatal 2345-0002.
+    //                  launch with Atmosph闂備胶绮銊╃嵁瀹?fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -195,14 +195,23 @@ void services_exit() {
     if (g_service_users > 0) --g_service_users;
     if (g_service_users > 0 || !g_services_up) return;
 
+    // Deliberately does NOT tear the network stack down.
+    //
+    // Closing the overlay ran curl_global_cleanup(), nifmExit() and socketExit()
+    // here, and doing so made the loader fail immediately afterwards with
+    // Atmosph猫re fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
+    // nx-ovlloader's own `fsFileRead` of the next NRO returning an error or zero
+    // bytes. The overlay is unmapped straight after this returns, so nothing it
+    // leaves behind can be observed, and overlays that are known to work on this
+    // console (NX-FanControl, FPSLocker, Status-Monitor) likewise just let the
+    // process clean up.
+    //
+    // Set NEXTENDO_TEARDOWN_NETWORK to re-enable the teardown for experiments.
+#ifdef NEXTENDO_TEARDOWN_NETWORK
     curl_global_cleanup();
     nifmExit();
-    // Mirrors the network probe, which is known to close cleanly on this
-    // console: it calls socketInitialize() on the way in and socketExit() on the
-    // way out. socketExit() is reference counted, so calling it only undoes the
-    // initialisation this overlay performed and leaves a pre-existing stack
-    // alone.
     socketExit();
+#endif
     g_services_up = false;
 }
 
@@ -222,7 +231,7 @@ void FetchJob::start() {
     // Synchronous on purpose.
     //
     // The worker-thread version crashed the loader process on close
-    // (Atmosph閻氱幎e fatal 2347-0004, PC=0) while the probe that performs the same
+    // (Atmosph闁绘氨骞巈 fatal 2347-0004, PC=0) while the probe that performs the same
     // network work without a thread closed cleanly, which pointed at
     // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
     // request inline removes that whole code path; the cost is that the panel
