@@ -39,6 +39,10 @@ private:
     void rebuild(const FetchOutcome* outcome, const std::string& status_text,
                  bool status_faint);
 
+    // Kicks off a fetch, if one is not already running. Shared by the X button
+    // and by the click listener on the status row.
+    void begin_fetch();
+
     FetchJob* job_ = nullptr;
 
     tsl::elm::OverlayFrame* frame_ = nullptr;
