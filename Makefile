@@ -54,7 +54,12 @@ NO_ICON		:=	1
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE
+# Flags mirror an overlay that is known to work on the target console
+# (NX-FanControl): same ARCH including -mtp=soft, and no -Wl,--gc-sections.
+# -mtp=soft matters here: devkitA64 patches the thread-pointer model, and
+# omitting it changes TLS addressing, which overlays are sensitive to because
+# libnx stores its thread vars in TLS.
+ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 			$(ARCH) $(DEFINES)
@@ -66,8 +71,7 @@ CFLAGS	+=	$(INCLUDE) -D__SWITCH__
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -std=c++20
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) \
-			-Wl,--gc-sections
+LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
 # libcurl is built by devkitPro with its TLS backend pointed at libnx's own
 # `ssl` service (CURLSSLBACKEND_LIBNX), so HTTPS needs no CA bundle of our own.
