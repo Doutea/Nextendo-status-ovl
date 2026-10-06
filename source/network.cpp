@@ -128,7 +128,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with Atmosph闂備胶绮銊╃嵁瀹?fatal 2345-0002.
+    //                  launch with an Atmosphère fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -163,28 +163,24 @@ bool services_init() {
     // Optional: name resolution goes through sfdnsres, not nifm.
     nifmInitialize(NifmServiceType_User);
 
-    // Warm up name resolution here, while `sm:` is guaranteed to be open.
+    // Hold an `sm:` session for the overlay's whole lifetime.
     //
-    // libtesla wraps initServices() in doWithSmSession, but the fetch itself
-    // runs later from onShow(), outside that session. libnx's sfdnsres resolver
-    // initialises lazily on the first getaddrinfo and needs `sm:` at that moment
-    // to fetch its service handle; without it the call fails inside the SM
-    // module, which libnx maps to errno = EAGAIN (11) and curl reports only as
-    // "Couldn't resolve host name".
+    // libtesla's loop() wraps initServices() in doWithSmSession, which calls
+    // smExit() as soon as it returns:
+    //     static inline void doWithSmSession(F f) { smInitialize(); f(); smExit(); }
+    // libnx's sfdnsres resolver initialises lazily, on the first getaddrinfo, and
+    // needs `sm:` at that moment to fetch its service handle. The fetch runs
+    // later, from onShow(), which is OUTSIDE that session, so without this extra
+    // reference name resolution fails inside the SM module - libnx maps that to
+    // errno = EAGAIN (11) and curl reports only "Couldn't resolve host name".
     //
-    // Doing one throwaway lookup now initialises the resolver while the session
-    // is available, so later lookups need no session at all. This avoids holding
-    // `sm:` open for the overlay's whole lifetime, which matters because the
-    // loader can reopen an overlay repeatedly inside one process.
-    {
-        addrinfo hints{};
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-        addrinfo* probe = nullptr;
-        if (getaddrinfo("nextendo.network", "443", &hints, &probe) == 0 && probe != nullptr) {
-            freeaddrinfo(probe);
-        }
-    }
+    // Service initialisers are reference counted (libnx's ServiceGuard), so this
+    // open balances against the smExit() in services_exit(), and libtesla's own
+    // open/close around initServices() stays balanced too.
+    //
+    // A single throwaway lookup here was tried instead and was NOT enough; the
+    // session genuinely has to be open while the resolver is used.
+    smInitialize();
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     g_services_up = true;
@@ -199,7 +195,7 @@ void services_exit() {
     //
     // Closing the overlay ran curl_global_cleanup(), nifmExit() and socketExit()
     // here, and doing so made the loader fail immediately afterwards with
-    // Atmosph猫re fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
+    // an Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
     // nx-ovlloader's own `fsFileRead` of the next NRO returning an error or zero
     // bytes. The overlay is unmapped straight after this returns, so nothing it
     // leaves behind can be observed, and overlays that are known to work on this
@@ -212,6 +208,10 @@ void services_exit() {
     nifmExit();
     socketExit();
 #endif
+    // Balance the smInitialize() in services_init(). This is not part of the
+    // network stack and is cheap; only the socket/curl teardown above broke the
+    // following NRO load.
+    smExit();
     g_services_up = false;
 }
 
@@ -231,7 +231,7 @@ void FetchJob::start() {
     // Synchronous on purpose.
     //
     // The worker-thread version crashed the loader process on close
-    // (Atmosph闁绘氨骞巈 fatal 2347-0004, PC=0) while the probe that performs the same
+    // (an Atmosphère fatal 2347-0004, PC=0) while the probe that performs the same
     // network work without a thread closed cleanly, which pointed at
     // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
     // request inline removes that whole code path; the cost is that the panel
