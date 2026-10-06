@@ -1,6 +1,4 @@
-#include "network.hpp"
-
-#include "debug_log.hpp"
+﻿#include "network.hpp"
 
 #include <curl/curl.h>
 
@@ -118,7 +116,6 @@ CURLcode get(const char* url, BodySink& sink, long& http_status,
 }  // namespace
 
 bool services_init() {
-    debug_log("services_init");
     ++g_service_users;
     if (g_services_up) return true;
 
@@ -134,7 +131,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with Atmosph鐚玶e fatal 2345-0002.
+    //                  launch with Atmosph閻氱幎e fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -195,7 +192,6 @@ bool services_init() {
 }
 
 void services_exit() {
-    debug_log("services_exit");
     if (g_service_users > 0) --g_service_users;
     if (g_service_users > 0 || !g_services_up) return;
 
@@ -214,9 +210,7 @@ FetchJob::~FetchJob() {
 }
 
 void FetchJob::start() {
-    debug_log("start: begin");
     if (state_.load(std::memory_order_acquire) == FetchState::Running) {
-        debug_log("start: already running");
         return;
     }
 
@@ -227,14 +221,13 @@ void FetchJob::start() {
     // Synchronous on purpose.
     //
     // The worker-thread version crashed the loader process on close
-    // (Atmosphère fatal 2347-0004, PC=0) while the probe that performs the same
+    // (Atmosph猫re fatal 2347-0004, PC=0) while the probe that performs the same
     // network work without a thread closed cleanly, which pointed at
     // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
     // request inline removes that whole code path; the cost is that the panel
     // cannot animate while a request is in flight, which the short timeouts in
     // get() keep to a few seconds at worst.
     run();
-    debug_log("start: done");
 }
 
 void FetchJob::run() {
@@ -292,7 +285,6 @@ void FetchJob::run() {
     // Release: the store makes every write above visible to a reader that
     // observes Done/Failed with an acquire load.
     state_.store(outcome.state, std::memory_order_release);
-    debug_log("worker: run end");
 }
 
 FetchOutcome FetchJob::result() const {
