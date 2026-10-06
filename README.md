@@ -43,7 +43,11 @@ GET https://nextendo.network/api/online-counts
 
 > **为什么必须带 NACP（重要，别再删掉）**：Ultrahand 的 `getOverlayInfo()` 会读 NRO 主体之后的资源头，并**从 NACP 里取 overlay 的显示名和版本**。如果缺了 NACP，它返回 `ResultParseError`，列表里那个 `if (result != ResultSuccess) continue;` 就会**直接跳过整个文件——条目根本不会生成**。所以 Makefile 里不能设 `NO_NACP`，而且 `.ovl` 规则必须依赖 `.nacp`（否则 `nacptool` 不会被触发，`elf2nro` 会报 `Failed to open input nacp!`）。参考对照：能正常显示的 FPSLocker 尾部有 16,440 字节资源数据，缺 NACP 时尾部为 0。
 
-> **如果在 Ultrahand 菜单里看不到这一项**：先确认文件大小是 **1,101,884 字节**（旧版是 1,085,444，那版缺 NACP 一定不显示）。若仍有问题，进入 `PLUS` → 设置 → **Miscellaneous** → 确认 **hide unsupported overlays** 处于**关闭**状态（该项默认关闭，打开反而会隐藏更多）。
+> **关于 UI 框架的选择**：本项目**用 WerWolv 的 libtesla，而不是 libultrahand**。理由是实测得出的：目标主机上确认可用的几个 overlay（NX-FanControl、FPSLocker、Status-Monitor、EdiZon）全部是 libtesla 构建、且**文件末尾都没有 `ULTR` 签名**。Ultrahand 是 Tesla 菜单的 drop-in 替代品，因此普通 libtesla overlay 能正常被列出和启动。而同一份代码用 libultrahand + `ULTR` 构建时，在 HOS 22.5.0 / AMS 1.11.2 上启动即触发 fatal `2345-0002`（PC=0）。**不要盲目加回 `ULTR` 尾标。**
+
+> **`probe/` 目录**是诊断用的最小 overlay：只画一屏文字、不初始化任何服务。用来二分定位"是我的代码有问题"还是"框架/加载器集成有问题"。它会作为独立产物 `probe-ovl` 一起编译。
+
+> **如果唤出后仍然崩溃**：先装 `probe-ovl.ovl` 试一次。若探针能正常显示，说明问题在本 overlay 的 `initServices()` 或网络层，而不是集成方式。
 
 ### 操作
 
@@ -131,13 +135,18 @@ make -C tests run     # 需要 g++/clang++，会启用 ASan/UBSan
 
 - **接口行为**：`/api/online-counts` 返回 200、公开、无需鉴权，并用真实响应验证了 `sum(jeux)` 与 `sum(counts)` 的差异（47 vs 49）；
 - **JSON 解析器**：53 项断言全部通过（含 UTF-8 重音字符、`\uXXXX` 代理对、未知字段容错、截断与语法错误区分、负数/异常值钳制、越界读取防护）。本地跑过，也在 CI 的 ASan/UBSan 下通过；
-- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 + libultrahand 编译链接成功，产物 1,085,444 字节；
-- **产物格式校验**：`HOMEBREW` + `NRO0` 头部魔数正确，且末尾带 `55 4c 54 52`（`ULTR`）—— Ultrahand 据此把它认作自家 overlay。
+- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 + libtesla 编译链接成功；
+- **产物格式校验**：`HOMEBREW` + `NRO0` 头部魔数正确、含 `ASET` 资源头与 NACP，尾部资源大小（16,440 字节）与实测可用的 FPSLocker 完全一致；
+- **菜单可见性**：已由真机确认能在 Ultrahand 菜单中列出并启动（此前缺 NACP 时完全不显示）。
 
-**尚未验证：**
+**尚未验证 / 已知问题：**
 
-- **未在真机上运行过。** 网络路径（libnx 的 `ssl` 服务能否与 Cloudflare 成功握手）、Tesla 的唤出组合键与焦点行为，都需要上机确认。首次运行建议在游戏里唤出后先按 `X` 手动刷新一次，观察是否能拿到数据。
-- **若 TLS 握手失败**（可能表现为 `SSL connect error`）：说明该主机/固件组合下 `ssl` 服务的证书校验未通过。可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
+- **启动后崩溃，尚未修复。** 真机日志为 Atmosphère fatal `2345-0002 (0x559)`，`Program: 420000000007E51A`（nx-ovlloader 进程），`PC = 0`，寄存器全零。这发生在 overlay 被识别并启动之后。
+  - 已排除：NRO 头与分段表（与可用文件结构一致）、NACP 缺失、文件命名与路径。
+  - 已尝试并失败的方案：改用 libultrahand 并追加 `ULTR` 签名（同样崩溃）。
+  - 下一步：用 `probe/` 探针二分定位，见上文。
+- **未在真机上验证过联网取数。** 网络路径（libnx 的 `ssl` 服务与 Cloudflare 握手）仍需上机确认。
+- **若 TLS 握手失败**（表现为 `SSL connect error`）：可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
 
 ---
 
