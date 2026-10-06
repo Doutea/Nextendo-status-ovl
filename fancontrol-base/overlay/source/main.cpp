@@ -14,6 +14,9 @@
 
 #define TESLA_INIT_IMPL
 #include <tesla.hpp>
+
+#include <curl/curl.h>
+
 #include "main_menu.hpp"
 #include "nextendo.hpp"
 
