@@ -52,6 +52,17 @@ tsl::elm::Element* GuiMain::createUI() {
         return frame;
     }
 
+    // The transfer happens HERE, before anything is drawn.
+    //
+    // libtesla calls changeTo() -> createUI() after initScreen(), so the
+    // renderer is ready, and the panel is not on screen yet. Running the request
+    // at this point means the outcome is already in hand when the rows are
+    // built, with no dependence on which callback runs when.
+    //
+    // Fetching from onShow() instead was tried and the panel came up empty: the
+    // data arrived after createUI() had already read the job.
+    job_->start();
+
     const FetchOutcome outcome = job_->result();
     const bool failed = (job_->state() == FetchState::Failed);
     const OnlineCounts* counts = failed ? nullptr : &outcome.counts;
@@ -87,6 +98,8 @@ tsl::elm::Element* GuiMain::createUI() {
     // unconditionally and an empty std::function would abort.
     statusItem->setClickListener([job = job_](u64 keys) {
         if ((keys & HidNpadButton_A) != 0) {
+            // start() does nothing while a transfer is already running, and the
+            // replacement Gui renders whatever the job published.
             if (job != nullptr) job->start();
             // Rebuild the panel from scratch rather than mutating the live list.
             tsl::changeTo<GuiMain>(job);
