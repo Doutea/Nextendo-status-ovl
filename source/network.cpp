@@ -131,7 +131,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with Atmosphère fatal 2345-0002.
+    //                  launch with Atmosph猫re fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -170,6 +170,22 @@ bool services_init() {
     // Optional: name resolution goes through sfdnsres, not nifm.
     nifmInitialize(NifmServiceType_User);
 
+    // Hold an `sm:` session for the overlay's whole lifetime.
+    //
+    // libtesla's loop() wraps initServices() in doWithSmSession, which calls
+    // smExit() as soon as it returns:
+    //     static inline void doWithSmSession(F f) { smInitialize(); f(); smExit(); }
+    // libnx's sfdnsres resolver initialises lazily - on the first getaddrinfo -
+    // and needs `sm:` at that moment to fetch the service handle. Without this
+    // extra reference the session is already closed and the call fails inside
+    // the SM module, which libnx maps to errno = EAGAIN (11); curl then only
+    // reports "Couldn't resolve host name".
+    //
+    // Service initialisers are reference counted (libnx's ServiceGuard), so this
+    // open balances against the smExit() in services_exit(), and libtesla's own
+    // open/close around initServices() stays balanced too.
+    smInitialize();
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
     g_services_up = true;
     return true;
@@ -181,30 +197,13 @@ void services_exit() {
 
     curl_global_cleanup();
     nifmExit();
+    // Balance the smInitialize() in services_init().
+    smExit();
     // Deliberately no socketExit(): this overlay may not own the socket stack,
     // and tearing it down would break name resolution for whatever runs next in
     // the same process.
     g_services_up = false;
 }
-
-// Runs a callable while holding an `sm:` session open.
-//
-// This is what name resolution needs. libtesla's loop() wraps initServices() in
-// doWithSmSession, which CLOSES `sm:` again the moment it returns:
-//
-//     static inline void doWithSmSession(F f) { smInitialize(); f(); smExit(); }
-//
-// libnx's sfdnsres resolver initialises lazily, on the first getaddrinfo, and
-// needs `sm:` at that moment to fetch the service handle. With the session
-// already gone the call fails inside the SM module, which libnx maps to
-// errno = EAGAIN (11); curl then only reports "Couldn't resolve host name".
-template <typename F>
-void with_sm_session(F&& body) {
-    smInitialize();
-    body();
-    smExit();
-}
-
 
 FetchJob::~FetchJob() {
     cancel();
@@ -252,55 +251,53 @@ void FetchJob::start() {
 void FetchJob::run() {
     FetchOutcome outcome;
 
-    // The whole transfer runs with `sm:` held open. The resolver service
-    // (sfdnsres) initialises on first use and needs the session then; see the
-    // comment on with_sm_session() for why that matters.
-    with_sm_session([&] {
-        // Health first: it is tiny, and a failure here is the clearest signal
-        // that the network (not the stats endpoint) is the problem.
-        BodySink health;
-        long health_status = 0;
-        std::string health_error;
-        const CURLcode health_rc =
-            get(kHealthUrl, health, health_status, abort_, health_error);
-        outcome.health_ok = (health_rc == CURLE_OK && health_status == 200 &&
-                             health.data.find("true") != std::string::npos);
+    // The `sm:` session that name resolution needs is held open for the whole
+    // overlay lifetime by services_init(), so nothing is opened here.
+    //
+    // Health first: it is tiny, and a failure here is the clearest signal
+    // that the network (not the stats endpoint) is the problem.
+    BodySink health;
+    long health_status = 0;
+    std::string health_error;
+    const CURLcode health_rc =
+        get(kHealthUrl, health, health_status, abort_, health_error);
+    outcome.health_ok = (health_rc == CURLE_OK && health_status == 200 &&
+                         health.data.find("true") != std::string::npos);
 
-        BodySink body;
-        long http_status = 0;
-        std::string error;
-        const CURLcode rc = get(kCountsUrl, body, http_status, abort_, error);
+    BodySink body;
+    long http_status = 0;
+    std::string error;
+    const CURLcode rc = get(kCountsUrl, body, http_status, abort_, error);
 
-        outcome.http_status = static_cast<int>(http_status);
+    outcome.http_status = static_cast<int>(http_status);
 
-        if (abort_.load(std::memory_order_relaxed)) {
-            outcome.state = FetchState::Failed;
-            outcome.error = "cancelled";
-        } else if (rc != CURLE_OK) {
-            outcome.state = FetchState::Failed;
-            outcome.error = error.empty() ? "network error" : error;
-        } else if (http_status != 200) {
-            outcome.state = FetchState::Failed;
-            outcome.error = "server returned HTTP " + std::to_string(http_status);
-        } else {
-            // Use the std::string overload: passing (data, size) here matched the
-            // inline overload whose own parameter is also named `body`, which
-            // shadowed the local variable and made the call fail to resolve.
-            switch (parse_online_counts(body.data, outcome.counts)) {
-                case ParseStatus::Ok:
-                    outcome.state = FetchState::Done;
-                    break;
-                case ParseStatus::Truncated:
-                    outcome.state = FetchState::Failed;
-                    outcome.error = "truncated response";
-                    break;
-                case ParseStatus::Syntax:
-                    outcome.state = FetchState::Failed;
-                    outcome.error = "unexpected response format";
-                    break;
-            }
+    if (abort_.load(std::memory_order_relaxed)) {
+        outcome.state = FetchState::Failed;
+        outcome.error = "cancelled";
+    } else if (rc != CURLE_OK) {
+        outcome.state = FetchState::Failed;
+        outcome.error = error.empty() ? "network error" : error;
+    } else if (http_status != 200) {
+        outcome.state = FetchState::Failed;
+        outcome.error = "server returned HTTP " + std::to_string(http_status);
+    } else {
+        // Use the std::string overload: passing (data, size) here matched the
+        // inline overload whose own parameter is also named `body`, which
+        // shadowed the local variable and made the call fail to resolve.
+        switch (parse_online_counts(body.data, outcome.counts)) {
+            case ParseStatus::Ok:
+                outcome.state = FetchState::Done;
+                break;
+            case ParseStatus::Truncated:
+                outcome.state = FetchState::Failed;
+                outcome.error = "truncated response";
+                break;
+            case ParseStatus::Syntax:
+                outcome.state = FetchState::Failed;
+                outcome.error = "unexpected response format";
+                break;
         }
-    });
+    }
 
     published_ = outcome;
     // Release: the store makes every write above visible to a reader that
