@@ -4,11 +4,6 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
-    inputs:
-      build_probe:
-        description: "Also build the diagnostic probe overlay"
-        type: boolean
-        default: false
 
 jobs:
   # The JSON parser is the part that decides whether the number on screen is
@@ -55,8 +50,9 @@ jobs:
           path: nextendo-ovl-sd.zip
           if-no-files-found: error
 
-      # Diagnostic build, used to tell a libultrahand/loader problem apart from
-      # a problem in this overlay's own code.
+      # A minimal overlay that draws text and initialises nothing. Used to tell
+      # a problem in this overlay's own code apart from a problem in the
+      # libtesla/loader integration.
       - name: Build diagnostic probe
         run: bash scripts/build_probe.sh
 
@@ -64,5 +60,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: probe-ovl
-          path: probe-ovl.ovl
+          path: probe/probe-ovl.ovl
           if-no-files-found: error
