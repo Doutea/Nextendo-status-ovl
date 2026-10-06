@@ -1,0 +1,42 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The JSON parser is the part that decides whether the number on screen is
+  # correct, and it has no Switch dependency, so it is tested on a normal host
+  # with the sanitizers enabled. This job is the real gate.
+  test:
+    name: host tests (json parser)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run unit tests under ASan/UBSan
+        run: make -C tests run
+
+  build:
+    name: build .ovl (devkitA64)
+    runs-on: ubuntu-latest
+    needs: test
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
+
+      - name: Build overlay
+        run: bash scripts/build.sh
+
+      - name: Upload .ovl
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextendo-ovl
+          path: nextendo-ovl.ovl
+          if-no-files-found: error
