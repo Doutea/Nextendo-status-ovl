@@ -49,7 +49,11 @@ void GuiMain::rebuild(const FetchOutcome* outcome, const std::string& status_tex
         "Players online",
         counts != nullptr ? std::to_string(counts->total) : "--"));
 
-    list->addItem(new tsl::elm::ListItem("Status", status_text, status_faint));
+    // ListItem's constructor takes only (text, value); the "faint" style is set
+    // afterwards with setValue, so it cannot be passed here.
+    auto* statusItem = new tsl::elm::ListItem("Status", status_text);
+    statusItem->setValue(status_text, status_faint);
+    list->addItem(statusItem);
 
     if (outcome != nullptr) {
         list->addItem(new tsl::elm::ListItem("Nextendo API", outcome->health_ok ? "ok" : "degraded"));
