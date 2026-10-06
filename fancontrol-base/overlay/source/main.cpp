@@ -41,12 +41,17 @@ public:
 
     virtual void exitServices() override
     {
-        // Balances the smInitialize() above. The socket stack is deliberately
-        // NOT closed here: socketExit() made nx-ovlloader fail right afterwards
-        // with an Atmosphère fatal 2347-0004 (its own read of the next NRO
-        // returning an error). The overlay is unmapped the moment main()
-        // returns, so nothing left behind is reachable.
-        smExit();
+        // Deliberately does NOT close anything.
+        //
+        // smExit() was here to balance the smInitialize() above, but closing that
+        // session on the way out is what crashes the loader, so the reference is
+        // simply left open. The overlay is unmapped the moment main() returns and
+        // libnx's own exit path closes sm: anyway, so nothing leaks and there is
+        // nothing to balance.
+        //
+        // socketExit() is left out for the same reason: it made nx-ovlloader fail
+        // right afterwards with an Atmosphère fatal 2347-0004 (its own read of the
+        // next NRO returning an error).
         fsdevUnmountAll();
     }
 
