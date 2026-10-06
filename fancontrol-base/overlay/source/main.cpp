@@ -33,10 +33,10 @@ public:
     virtual void exitServices() override
     {
         // fsdevUnmountAll() is kept from the template. The socket stack is
-        // deliberately left alone: socketInitialize() reports
-        // LibnxError_AlreadyInitialized in this process, so it is not ours to
-        // close, and closing it made nx-ovlloader fail right afterwards with an
-        // Atmosphère fatal 2347-0004 (its own read of the next NRO).
+        // deliberately NOT closed: socketExit() here made nx-ovlloader fail
+        // right afterwards with an Atmosphère fatal 2347-0004 (its own read of
+        // the next NRO returning an error), and the overlay is unmapped the
+        // moment main() returns anyway.
         fsdevUnmountAll();
     }
 
