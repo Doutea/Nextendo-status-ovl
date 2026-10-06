@@ -22,7 +22,7 @@ TARGET		:=	nextendo-ovl
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	source ../../libs/libtesla/include
+INCLUDES	:=	source ../libs/libtesla/include
 
 NO_ICON		:=	1
 
