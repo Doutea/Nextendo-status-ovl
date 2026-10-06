@@ -134,6 +134,10 @@ bool services_init() {
     // do not own untouched removes that entirely.
     nifmInitialize(NifmServiceType_User);
 
+    // curl's global state belongs here, next to the other service setup: the
+    // build that put it inside the request instead never produced any data.
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
     g_services_up = true;
     return true;
 }
@@ -197,10 +201,6 @@ void FetchJob::run() {
     // the overlay closed. Scoping it to the request keeps the session alive
     // exactly when the resolver touches it, and gone before teardown.
     smInitialize();
-
-    // curl global state is set up here, not in services_init(), so the
-    // diagnostic build that skips network initialisation skips it too.
-    curl_global_init(CURL_GLOBAL_DEFAULT);
 
     // Health first: it is tiny, and a failure here is the clearest signal
     // that the network (not the stats endpoint) is the problem.
