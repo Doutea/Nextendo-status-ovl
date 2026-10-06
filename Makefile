@@ -54,7 +54,10 @@ CFLAGS	:=	-g -Wall -Wextra -O2 -ffunction-sections \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__
 
-CXXFLAGS	:= $(CFLAGS) -fno-exceptions -fno-rtti -std=c++20
+# -fno-rtti is deliberately NOT used: libtesla itself relies on dynamic_cast
+# (tesla.hpp, List::layout), so RTTI has to stay enabled. -fno-exceptions is
+# safe because nothing in the overlay relies on exception handling.
+CXXFLAGS	:= $(CFLAGS) -fno-exceptions -std=c++20
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
