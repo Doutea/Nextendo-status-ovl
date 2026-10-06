@@ -63,29 +63,26 @@ if [ ! -f nextendo-ovl.ovl ]; then
     exit 1
 fi
 
-echo "==> inspecting artifacts"
-ls -l nextendo-ovl.elf nextendo-ovl.ovl || true
-echo "--- file(1) ---"
-file nextendo-ovl.elf nextendo-ovl.ovl || true
-echo "--- first 32 bytes of the .ovl ---"
-od -A d -t x1z -N 32 nextendo-ovl.ovl || true
-echo "--- first 32 bytes of the .elf ---"
-od -A d -t x1z -N 32 nextendo-ovl.elf || true
-echo "--- elf2nro run by hand, capturing its exit status ---"
-set +e
-elf2nro nextendo-ovl.elf /tmp/manual.ovl
-manual_status=$?
-set -e
-echo "elf2nro exit: $manual_status"
-ls -l /tmp/manual.ovl 2>/dev/null || true
-od -A d -t x1z -N 16 /tmp/manual.ovl 2>/dev/null || true
+echo "==> result"
+ls -l nextendo-ovl.elf nextendo-ovl.ovl
 
-# An .ovl is a libnx NRO with a different extension, so the magic must be NRO0.
-magic=$(head -c 4 nextendo-ovl.ovl)
+# Validate the NRO header. The layout is:
+#   offset 0  : 4-byte AArch64 branch instruction (jumps past the header)
+#   offset 8  : "HOMEBREW" magic
+#   offset 16 : "NRO0" magic
+# so the NRO magic is NOT at offset 0. `dd` is used rather than `head` because
+# the leading bytes contain NULs, which command substitution mangles.
+magic=$(dd if=nextendo-ovl.ovl bs=1 skip=16 count=4 2>/dev/null)
 if [ "$magic" != "NRO0" ]; then
-    echo "ERROR: output is not a valid NRO (magic was '$magic')" >&2
+    echo "ERROR: output is not a valid NRO (magic at offset 16 was '$magic')" >&2
     exit 1
 fi
 
-echo "==> ok"
-ls -l nextendo-ovl.ovl
+# The overlay must contain something, and a plausible amount of it.
+size=$(stat -c %s nextendo-ovl.ovl)
+if [ "$size" -lt 100000 ]; then
+    echo "ERROR: the .ovl is suspiciously small ($size bytes)" >&2
+    exit 1
+fi
+
+echo "==> ok: nextendo-ovl.ovl ($size bytes, NRO0 header verified)"
