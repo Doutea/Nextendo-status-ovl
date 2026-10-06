@@ -128,7 +128,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with an Atmosphère fatal 2345-0002.
+    //                  launch with an Atmosph猫re fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -163,24 +163,10 @@ bool services_init() {
     // Optional: name resolution goes through sfdnsres, not nifm.
     nifmInitialize(NifmServiceType_User);
 
-    // Hold an `sm:` session for the overlay's whole lifetime.
-    //
-    // libtesla's loop() wraps initServices() in doWithSmSession, which calls
-    // smExit() as soon as it returns:
-    //     static inline void doWithSmSession(F f) { smInitialize(); f(); smExit(); }
-    // libnx's sfdnsres resolver initialises lazily, on the first getaddrinfo, and
-    // needs `sm:` at that moment to fetch its service handle. The fetch runs
-    // later, from onShow(), which is OUTSIDE that session, so without this extra
-    // reference name resolution fails inside the SM module - libnx maps that to
-    // errno = EAGAIN (11) and curl reports only "Couldn't resolve host name".
-    //
-    // Service initialisers are reference counted (libnx's ServiceGuard), so this
-    // open balances against the smExit() in services_exit(), and libtesla's own
-    // open/close around initServices() stays balanced too.
-    //
-    // A single throwaway lookup here was tried instead and was NOT enough; the
-    // session genuinely has to be open while the resolver is used.
-    smInitialize();
+    // No `sm:` session is held here. FetchJob::run() opens one around the
+    // transfer, which is the only moment the resolver needs it; holding it for
+    // the whole overlay lifetime made the loader crash right after the overlay
+    // closed.
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     g_services_up = true;
@@ -195,7 +181,7 @@ void services_exit() {
     //
     // Closing the overlay ran curl_global_cleanup(), nifmExit() and socketExit()
     // here, and doing so made the loader fail immediately afterwards with
-    // an Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
+    // an Atmosph猫re fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
     // nx-ovlloader's own `fsFileRead` of the next NRO returning an error or zero
     // bytes. The overlay is unmapped straight after this returns, so nothing it
     // leaves behind can be observed, and overlays that are known to work on this
@@ -208,10 +194,6 @@ void services_exit() {
     nifmExit();
     socketExit();
 #endif
-    // Balance the smInitialize() in services_init(). This is not part of the
-    // network stack and is cheap; only the socket/curl teardown above broke the
-    // following NRO load.
-    smExit();
     g_services_up = false;
 }
 
@@ -231,7 +213,7 @@ void FetchJob::start() {
     // Synchronous on purpose.
     //
     // The worker-thread version crashed the loader process on close
-    // (an Atmosphère fatal 2347-0004, PC=0) while the probe that performs the same
+    // (an Atmosph猫re fatal 2347-0004, PC=0) while the probe that performs the same
     // network work without a thread closed cleanly, which pointed at
     // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
     // request inline removes that whole code path; the cost is that the panel
@@ -242,6 +224,14 @@ void FetchJob::start() {
 
 void FetchJob::run() {
     FetchOutcome outcome;
+
+    // Open `sm:` only around the transfer.
+    //
+    // The resolver needs the session while it is used, and holding it open for
+    // the whole overlay lifetime was tried and made the loader crash right after
+    // the overlay closed. Scoping it to the request keeps the session alive
+    // exactly when the resolver touches it, and gone before teardown.
+    smInitialize();
 
     // Health first: it is tiny, and a failure here is the clearest signal
     // that the network (not the stats endpoint) is the problem.
@@ -257,6 +247,8 @@ void FetchJob::run() {
     long http_status = 0;
     std::string error;
     const CURLcode rc = get(kCountsUrl, body, http_status, abort_, error);
+
+    smExit();
 
     outcome.http_status = static_cast<int>(http_status);
 
