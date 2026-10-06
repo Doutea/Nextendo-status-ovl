@@ -3,7 +3,6 @@ name: build
 on:
   push:
     branches: [main, master]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -31,7 +30,10 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
 
-      - name: Build overlay
+      # Produces nextendo-ovl.ovl plus nextendo-ovl-sd.zip, a ready-to-copy
+      # SD-card layout. The zip is built inside the container on Linux so the
+      # archive entries use forward slashes.
+      - name: Build overlay and SD-card package
         run: bash scripts/build.sh
 
       - name: Upload .ovl
@@ -39,4 +41,11 @@ jobs:
         with:
           name: nextendo-ovl
           path: nextendo-ovl.ovl
+          if-no-files-found: error
+
+      - name: Upload SD-card package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextendo-ovl-sd
+          path: nextendo-ovl-sd.zip
           if-no-files-found: error
