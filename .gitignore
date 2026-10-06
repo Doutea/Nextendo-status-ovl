@@ -1,0 +1,14 @@
+# Build output
+build/
+tests/build/
+*.ovl
+*.nro
+*.nacp
+*.elf
+*.map
+*.zip
+out/
+
+# Editor
+.vscode/
+*.code-workspace
