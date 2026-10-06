@@ -1,18 +1,20 @@
 #---------------------------------------------------------------------------------
-# Nextendo Overlay — player counts for the Nextendo Network, from the Ultrahand
-# (or Tesla) overlay menu.
+# Nextendo Overlay — player counts for the Nextendo Network, from the Tesla /
+# Ultrahand overlay menu.
 #
 # An .ovl is a libnx homebrew NRO with a different extension, loaded by the
 # nx-ovlloader sysmodule. There is no Atmosphère-specific build step: we link
 # against switch.specs and convert the ELF with elf2nro.
 #
-# Built on libultrahand (the maintained fork of libtesla, and what Ultrahand
-# Overlay itself is built with), so the result is a first-class Ultrahand
-# overlay. That matters because Ultrahand hides overlays it considers
-# unsupported; the `ULTR` trailer appended below is how it recognises its own.
+# Built on WerWolv's libtesla rather than libultrahand on purpose: every overlay
+# confirmed working on the target console (NX-FanControl, FPSLocker,
+# Status-Monitor, EdiZon) is built this way, and a libultrahand build of this
+# same overlay crashed the loader on launch (Atmosphère fatal 2345-0002, PC=0).
+# Ultrahand is a drop-in Tesla replacement, so a plain libtesla overlay is listed
+# and launched normally.
 #
 # Local build (inside the devkitPro MSYS2 shell):
-#   pacman -S --needed switch-dev switch-curl switch-zlib switch-minizip switch-mbedtls
+#   pacman -S --needed switch-dev switch-curl switch-zlib
 #   make
 #
 # The result is nextendo-ovl.ovl, to copy to sdmc:/switch/.overlays/.
@@ -30,14 +32,12 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 # NACP is REQUIRED, not optional.
 #
-# Ultrahand's getOverlayInfo() reads the NACP resource that elf2nro appends after
-# the NRO and takes the overlay's display name and version from it. If the NACP
-# is missing it returns ResultParseError and the overlay is skipped entirely -
-# it never appears in the menu at all. (NO_NACP := 1 was set here originally on
-# the mistaken assumption that NACP only matters to hbmenu.)
+# Ultrahand's getOverlayInfo() reads the NACP resource elf2nro appends after the
+# NRO and takes the overlay's display name and version from it. Without the NACP
+# it returns ResultParseError, the menu loop does `if (result != ResultSuccess)
+# continue;`, and the overlay never appears at all.
 #
-# An icon is not required: elf2nro falls back to libnx's default_icon.jpg when
-# none is supplied.
+# An icon is not required: elf2nro falls back to libnx's default_icon.jpg.
 #---------------------------------------------------------------------------------
 APP_TITLE	:=	Nextendo
 APP_AUTHOR	:=	Nextendo Overlay
@@ -47,28 +47,22 @@ TARGET		:=	nextendo-ovl
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	include source
+INCLUDES	:=	include source libs/libtesla/include
 
 NO_ICON		:=	1
-
-# Pulls libultrahand's sources and headers into SOURCES / INCLUDES.
-include $(TOPDIR)/libs/libultrahand/ultrahand.mk
 
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-# NOTE: -mtp=soft is deliberately omitted. It is a devkitA64-specific default
-# that upstream aarch64-none-elf-gcc rejects, and devkitA64 does not need it.
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections -fdata-sections \
+CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__
 
-# -fno-rtti is deliberately NOT used: the vendored libtesla uses dynamic_cast
-# (its List implementation), so RTTI has to stay enabled. -fno-exceptions is
-# safe because nothing here relies on exception handling.
+# -fno-rtti is deliberately NOT used: libtesla's List uses dynamic_cast, so RTTI
+# has to stay enabled. -fno-exceptions is safe here.
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -std=c++20
 
 ASFLAGS	:=	-g $(ARCH)
@@ -77,8 +71,7 @@ LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*
 
 # libcurl is built by devkitPro with its TLS backend pointed at libnx's own
 # `ssl` service (CURLSSLBACKEND_LIBNX), so HTTPS needs no CA bundle of our own.
-# The remaining libraries are what libultrahand requires.
-LIBS	:= -lcurl -lz -lminizip -lmbedtls -lmbedx509 -lmbedcrypto -lnx
+LIBS	:= -lcurl -lz -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
@@ -176,15 +169,13 @@ clean:
 
 #---------------------------------------------------------------------------------
 # Host-side unit tests for the JSON parser (no devkitA64 needed).
-# Kept out of `all` so a cross-build never depends on a host compiler.
 #---------------------------------------------------------------------------------
 test:
 	@$(MAKE) --no-print-directory -C tests run
 
 # A zip laid out exactly as it should be copied onto the SD card root:
 #   switch/.overlays/nextendo-ovl.ovl
-# Built here rather than externally so the archive entries use forward slashes,
-# which the console's extractor and every desktop tool handle correctly.
+# Built here rather than externally so the archive entries use forward slashes.
 dist: all
 	@rm -rf out
 	@mkdir -p out/switch/.overlays
@@ -207,17 +198,16 @@ all	:	$(OUTPUT).ovl
 # An overlay is an NRO with the .ovl extension.
 #
 # The .nacp prerequisite is essential, not cosmetic: `--nacp=` is passed to
-# elf2nro below, and switching it off produced an NRO with no asset header at
-# all, which made Ultrahand skip the file entirely (its getOverlayInfo() reads
-# the overlay name from that NACP). Listing it here is what triggers
-# switch_rules' `%.nacp` rule to actually generate it.
+# elf2nro below, and listing it here is what triggers switch_rules' `%.nacp`
+# rule. Without it elf2nro fails with "Failed to open input nacp!", and without
+# the NACP inside the NRO the overlay is silently skipped by Ultrahand.
 #
-# The trailing 'ULTR' marker is the signature Ultrahand looks for to treat the
-# binary as a libultrahand overlay.
+# No 'ULTR' trailer is appended: libultrahand-based overlays carry it, but this
+# one is built on plain libtesla like the overlays known to work on the target
+# console, none of which have it.
 $(OUTPUT).ovl		:	$(OUTPUT).elf $(OUTPUT).nacp
 	@elf2nro $< $@ $(NROFLAGS)
-	@printf 'ULTR' >> $@
-	@echo "built ... $(notdir $(OUTPUT).ovl) (NACP embedded, Ultrahand signature appended)"
+	@echo "built ... $(notdir $(OUTPUT).ovl) (libtesla build, NACP embedded)"
 
 $(OUTPUT).elf	:	$(OFILES)
 
