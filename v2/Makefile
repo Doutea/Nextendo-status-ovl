@@ -1,4 +1,4 @@
-#---------------------------------------------------------------------------------
+﻿#---------------------------------------------------------------------------------
 # Nextendo player-count overlay, minimal build.
 #
 # This Makefile is probe-ovl's, which is the only overlay here that has never
@@ -16,7 +16,7 @@ TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libnx/switch_rules
 
 APP_TITLE	:=	Nextendo
-APP_VERSION	:=	2.0.0
+APP_VERSION	:=	2.0.1
 
 TARGET		:=	nextendo-ovl
 BUILD		:=	build
