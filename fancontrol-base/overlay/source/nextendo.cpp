@@ -110,10 +110,9 @@ void fetch_and_store() {
     socket_config.sb_efficiency = 2;
     socketInitialize(&socket_config);
 
-    // The resolver (sfdnsres) initialises on first use and needs `sm:` at that
-    // moment. Fetching from createUI() runs outside libtesla's doWithSmSession,
-    // so the session is opened here for the duration of the request.
-    smInitialize();
+    // NOTE: no `sm:` session is opened here. It is held for the overlay's whole
+    // lifetime by NextendoOverlay::initServices(), because that is the only
+    // arrangement in which name resolution has worked on this console.
 
     BodySink health;
     long health_status = 0;
@@ -127,8 +126,6 @@ void fetch_and_store() {
     long http_status = 0;
     std::string error;
     const CURLcode rc = http_get(kCountsUrl, body, http_status, error);
-
-    smExit();
 
     if (rc != CURLE_OK) {
         result.error = error.empty() ? "request failed" : error;
