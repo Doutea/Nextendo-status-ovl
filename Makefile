@@ -153,7 +153,7 @@ ifneq ($(ROMFS),)
 	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: $(BUILD) clean all test dist
+.PHONY: $(BUILD) clean all test
 
 #---------------------------------------------------------------------------------
 all: $(BUILD)
@@ -172,17 +172,6 @@ clean:
 #---------------------------------------------------------------------------------
 test:
 	@$(MAKE) --no-print-directory -C tests run
-
-# A zip laid out exactly as it should be copied onto the SD card root:
-#   switch/.overlays/nextendo-ovl.ovl
-# Built here rather than externally so the archive entries use forward slashes.
-dist: all
-	@rm -rf out
-	@mkdir -p out/switch/.overlays
-	@cp $(TARGET).ovl out/switch/.overlays/
-	@rm -f $(TARGET)-sd.zip
-	@cd out && zip -qr ../$(TARGET)-sd.zip switch
-	@echo "built ... $(TARGET)-sd.zip"
 
 #---------------------------------------------------------------------------------
 else
