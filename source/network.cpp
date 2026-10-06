@@ -99,11 +99,29 @@ bool services_init() {
     ++g_service_users;
     if (g_services_up) return true;
 
-    // Use the library defaults rather than hand-tuning SocketInitConfig: the
-    // small-buffer configurations that look tempting in an overlay are the ones
-    // that trigger ZeroWindow stalls, and the response here is a few kilobytes.
-    // A single short-lived request does not need to shrink the socket pool.
-    if (R_FAILED(socketInitializeDefault())) {
+    // Do NOT use socketInitializeDefault() here.
+    //
+    // The library defaults are sized for a general-purpose application:
+    //   tcp_tx_buf_max 0x40000 + tcp_rx_buf_max 0x40000 + udp_tx 0x2400 +
+    //   udp_rx 0xA500, multiplied by sb_efficiency 4
+    // which reserves roughly 1.33 MB of TransferMemory. The overlay heap is
+    // capped at 4 MB by nx-ovlloader, and this overlay's own image is already
+    // ~1.8 MB, so the default reservation exhausted the heap and the overlay
+    // died on launch (Atmosphère fatal 2345-0002, PC=0).
+    //
+    // A single short HTTPS GET with a few-kilobyte response needs far less.
+    // Starting from the defaults keeps every other field correct if libnx adds
+    // any; only the memory numbers are overridden.
+    SocketInitConfig socket_config = *socketGetDefaultInitConfig();
+    socket_config.tcp_tx_buf_size = 0x2000;
+    socket_config.tcp_rx_buf_size = 0x2000;
+    socket_config.tcp_tx_buf_max_size = 0x8000;
+    socket_config.tcp_rx_buf_max_size = 0x8000;
+    socket_config.udp_tx_buf_size = 0x800;
+    socket_config.udp_rx_buf_size = 0x1000;
+    socket_config.sb_efficiency = 1;
+
+    if (R_FAILED(socketInitialize(&socket_config))) {
         --g_service_users;
         return false;
     }
