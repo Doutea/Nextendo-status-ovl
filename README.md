@@ -32,14 +32,18 @@ GET https://nextendo.network/api/online-counts
 
 ## 安装
 
-1. 确保已装好 **nx-ovlloader**（overlay 的加载器 sysmodule，非大气层自带）和 Tesla 菜单 / Ultrahand。
+1. 确保已装好 **nx-ovlloader**（overlay 的加载器 sysmodule，非大气层自带）和 Ultrahand / Tesla 菜单。
 2. 把 `nextendo-ovl.ovl` 复制到 SD 卡：
    ```
    sdmc:/switch/.overlays/nextendo-ovl.ovl
    ```
-3. 在游戏里按唤出组合键（Tesla 默认 `L + ↓ + R`，Ultrahand 默认 `ZL + ZR + ↓`）。
+3. 在游戏里按唤出组合键（Ultrahand 默认 `ZL + ZR + ↓`，Tesla 默认 `L + ↓ + R`）。
 
-`nextendo-ovl.zip` 里已经放好了 `switch/.overlays/` 目录结构，直接解压到 SD 卡根目录即可。
+`nextendo-ovl-sd.zip` 里已经放好了 `switch/.overlays/` 目录结构，直接解压到 SD 卡根目录即可。
+
+> **为什么必须带 NACP（重要，别再删掉）**：Ultrahand 的 `getOverlayInfo()` 会读 NRO 主体之后的资源头，并**从 NACP 里取 overlay 的显示名和版本**。如果缺了 NACP，它返回 `ResultParseError`，列表里那个 `if (result != ResultSuccess) continue;` 就会**直接跳过整个文件——条目根本不会生成**。所以 Makefile 里不能设 `NO_NACP`，而且 `.ovl` 规则必须依赖 `.nacp`（否则 `nacptool` 不会被触发，`elf2nro` 会报 `Failed to open input nacp!`）。参考对照：能正常显示的 FPSLocker 尾部有 16,440 字节资源数据，缺 NACP 时尾部为 0。
+
+> **如果在 Ultrahand 菜单里看不到这一项**：先确认文件大小是 **1,101,884 字节**（旧版是 1,085,444，那版缺 NACP 一定不显示）。若仍有问题，进入 `PLUS` → 设置 → **Miscellaneous** → 确认 **hide unsupported overlays** 处于**关闭**状态（该项默认关闭，打开反而会隐藏更多）。
 
 ### 操作
 
@@ -127,13 +131,13 @@ make -C tests run     # 需要 g++/clang++，会启用 ASan/UBSan
 
 - **接口行为**：`/api/online-counts` 返回 200、公开、无需鉴权，并用真实响应验证了 `sum(jeux)` 与 `sum(counts)` 的差异（47 vs 49）；
 - **JSON 解析器**：53 项断言全部通过（含 UTF-8 重音字符、`\uXXXX` 代理对、未知字段容错、截断与语法错误区分、负数/异常值钳制、越界读取防护）。本地跑过，也在 CI 的 ASan/UBSan 下通过；
-- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 编译链接成功，产物 782,336 字节，`HOMEBREW` + `NRO0` 头部魔数校验通过。
+- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 + libultrahand 编译链接成功，产物 1,085,444 字节；
+- **产物格式校验**：`HOMEBREW` + `NRO0` 头部魔数正确，且末尾带 `55 4c 54 52`（`ULTR`）—— Ultrahand 据此把它认作自家 overlay。
 
 **尚未验证：**
 
 - **未在真机上运行过。** 网络路径（libnx 的 `ssl` 服务能否与 Cloudflare 成功握手）、Tesla 的唤出组合键与焦点行为，都需要上机确认。首次运行建议在游戏里唤出后先按 `X` 手动刷新一次，观察是否能拿到数据。
-- **libtesla 上游自 2024-05 起未再更新。** 大气层 1.10 / HOS 21+ 改动了 userland↔kernel 的 TLS ABI，要求所有自制程序用新 libnx（≥4.10.0）重新编译。本项目只带 libtesla 的两个头文件、每次都在 CI 用最新 libnx 重新编译，因此通常没问题；若在 HOS 21+ 上出现异常，替代方案是换成仍在维护的 libultrahand（接口兼容，但要多依赖 curl/zlib/minizip/mbedtls）。
-- **若 TLS 握手失败**（可能表现为 "SSL connect error"）：说明该主机/固件组合下 `ssl` 服务的证书校验未通过。可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
+- **若 TLS 握手失败**（可能表现为 `SSL connect error`）：说明该主机/固件组合下 `ssl` 服务的证书校验未通过。可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
 
 ---
 
