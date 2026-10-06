@@ -116,59 +116,14 @@ bool services_init() {
     ++g_service_users;
     if (g_services_up) return true;
 
-    // Socket buffer tuning. Both extremes fail, so the values below are chosen
-    // against libnx's actual memory formula.
+    // DIAGNOSTIC: no socket, no nifm, no curl global state.
     //
-    // libnx computes the TransferMemory it hands to bsd: as
-    //     sb_efficiency * page_align(tcp_tx_buf_max + tcp_rx_buf_max
-    //                                + udp_tx_buf + udp_rx_buf)
-    // and documents (nx/source/services/bsd.c) that if that memory is too small
-    // "the BSD sockets service would only send ZeroWindow packets (for TCP),
-    // resulting in a transfer rate not exceeding 1 byte/s".
-    //
-    //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
-    //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with an Atmosphère fatal 2345-0002.
-    //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
-    //               -> below the threshold, so every transfer stalled.
-    //
-    // The sizes here give 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB.
-    SocketInitConfig socket_config = *socketGetDefaultInitConfig();
-    socket_config.tcp_tx_buf_size = 0x2000;
-    socket_config.tcp_rx_buf_size = 0x4000;
-    socket_config.tcp_tx_buf_max_size = 0x2000;
-    socket_config.tcp_rx_buf_max_size = 0x10000;
-    socket_config.udp_tx_buf_size = 0x1000;
-    socket_config.udp_rx_buf_size = 0x4000;
-    socket_config.sb_efficiency = 2;
-
-    // LibnxError_AlreadyInitialized means the socket stack is already up in this
-    // process, which is success - not a reason to give up. Treating it as a
-    // failure was a bug: it silently disabled networking.
-    //
-    // It must not be "cleaned up" either. libnx's own socketInitialize() calls
-    // socketExit() when its initialisation fails, so a half-finished attempt
-    // could otherwise tear down a working socket stack.
-    //
-    // The comparison uses R_DESCRIPTION: a Result packs the module in the low 9
-    // bits, so a plain R_VALUE() of the whole Result would never equal the bare
-    // error number.
-    const Result socket_rc = socketInitialize(&socket_config);
-    if (R_FAILED(socket_rc) &&
-        R_DESCRIPTION(socket_rc) != LibnxError_AlreadyInitialized) {
-        --g_service_users;
-        return false;
-    }
-
-    // Optional: name resolution goes through sfdnsres, not nifm.
-    nifmInitialize(NifmServiceType_User);
-
-    // No `sm:` session is held here. FetchJob::run() opens one around the
-    // transfer, which is the only moment the resolver needs it; holding it for
-    // the whole overlay lifetime made the loader crash right after the overlay
-    // closed.
-
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    // Closing the overlay makes nx-ovlloader fail immediately afterwards with
+    // Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4) - its own fsFileRead
+    // of the next NRO returning an error. That happens whether or not the network
+    // stack is torn down on exit, so the open question is whether merely
+    // INITIALISING it is what breaks the loader. With this body the panel still
+    // renders; if the exit crash disappears, the network services are the cause.
     g_services_up = true;
     return true;
 }
@@ -232,6 +187,10 @@ void FetchJob::run() {
     // the overlay closed. Scoping it to the request keeps the session alive
     // exactly when the resolver touches it, and gone before teardown.
     smInitialize();
+
+    // curl global state is set up here, not in services_init(), so the
+    // diagnostic build that skips network initialisation skips it too.
+    curl_global_init(CURL_GLOBAL_DEFAULT);
 
     // Health first: it is tiny, and a failure here is the clearest signal
     // that the network (not the stats endpoint) is the problem.
