@@ -1,31 +1,125 @@
-﻿// Diagnostic probe: proves this overlay can write a log to the SD card.
+// File-write probe.
 //
-// Every earlier attempt to capture a diagnostic log produced no file, which made
-// it useless. Before relying on a log again, this checks the write works - and
-// from exactly the call sites the real log will use (initServices and
-// exitServices, where libnx's fs is up and has not yet been taken down).
+// The log probe proved this overlay runs but cannot create a file on the SD
+// card, so the diagnostic log is unusable. This probe works out WHY, and
+// reports on screen instead of in a file - the results must not depend on the
+// very mechanism that is failing.
 //
-// It draws one line so it is visible in the overlay list, then writes on open
-// and on close. Afterwards, read sdmc:/nextendo.log.
+// It tries, in order:
+//   1. stdio fopen("w") at several paths, to see whether the failure is
+//      path-specific (the SD root versus a subdirectory, absolute versus
+//      relative);
+//   2. the raw fs API (fsOpenSdCardFileSystem + fsFsCreateFile + fsFileWrite),
+//      which bypasses devoptab and stdio entirely.
+//
+// Every attempt records its Result code, rendered as hex so a failure can be
+// looked up in Atmosphère's error tables.
 
 #define TESLA_INIT_IMPL
 #include <tesla.hpp>
 
-#include <cstdio>
+#include <switch.h>
 
-#include "diag.hpp"
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+namespace {
+
+struct Row {
+    std::string label;
+    std::string value;
+};
+
+std::string hex(Result rc) {
+    if (R_SUCCEEDED(rc)) return "ok";
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "0x%08X", static_cast<unsigned>(rc));
+    return buf;
+}
+
+// stdio: create a file and write a short string, then read it back.
+std::string stdio_write(const char* path) {
+    FILE* f = std::fopen(path, "w");
+    if (f == nullptr) {
+        // errno distinguishes "no such device" from "permission denied".
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "fopen null, errno %d", errno);
+        return buf;
+    }
+    std::fputs("hello\n", f);
+    std::fclose(f);
+
+    FILE* r = std::fopen(path, "r");
+    if (r == nullptr) return "wrote, reopen null";
+    char back[16] = {0};
+    const std::size_t got = std::fread(back, 1, sizeof(back) - 1, r);
+    std::fclose(r);
+
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "ok, read back %zu bytes", got);
+    return buf;
+}
+
+std::vector<Row> run_probe() {
+    std::vector<Row> rows;
+
+    // 1. stdio at several paths.
+    rows.push_back({"fopen sdmc:/nextendo.log", stdio_write("sdmc:/nextendo.log")});
+    rows.push_back({"fopen sdmc:/switch/nextendo.log", stdio_write("sdmc:/switch/nextendo.log")});
+    rows.push_back({"fopen /nextendo.log", stdio_write("/nextendo.log")});
+    rows.push_back({"fopen nextendo.log", stdio_write("nextendo.log")});
+
+    // 2. Raw fs, bypassing devoptab and stdio entirely.
+    FsFileSystem sdmc;
+    Result rc = fsOpenSdCardFileSystem(&sdmc);
+    rows.push_back({"fsOpenSdCardFileSystem", hex(rc)});
+
+    if (R_SUCCEEDED(rc)) {
+        Result create_rc = fsFsCreateFile(&sdmc, "/nextendo-raw.txt", 6, 0);
+        rows.push_back({"fsFsCreateFile", hex(create_rc)});
+
+        FsFile file;
+        Result open_rc = fsFsOpenFile(&sdmc, "/nextendo-raw.txt", FsOpenMode_Write, &file);
+        rows.push_back({"fsFsOpenFile(write)", hex(open_rc)});
+
+        if (R_SUCCEEDED(open_rc)) {
+            const char* payload = "hello\n";
+            Result wr = fsFileWrite(&file, 0, payload, std::strlen(payload),
+                                    FsWriteOption_None);
+            rows.push_back({"fsFileWrite", hex(wr)});
+            fsFileClose(&file);
+        }
+
+        if (R_SUCCEEDED(fsFsOpenFile(&sdmc, "/nextendo-raw.txt", FsOpenMode_Read, &file))) {
+            char buf[16] = {0};
+            u64 got = 0;
+            Result rd = fsFileRead(&file, 0, buf, 6, FsReadOption_None, &got);
+            char line[48];
+            std::snprintf(line, sizeof(line), "%s, %llu bytes",
+                          hex(rd), static_cast<unsigned long long>(got));
+            rows.push_back({"fsFileRead", line});
+            fsFileClose(&file);
+        }
+        fsFsClose(&sdmc);
+    }
+
+    return rows;
+}
 
 class ProbeGui : public tsl::Gui {
 public:
     virtual tsl::elm::Element* createUI() override {
-        auto* frame = new tsl::elm::OverlayFrame("Nextendo Log Probe",
-                                                 "\u65e5\u5fd7\u6d4b\u8bd5");  // 鏃ュ織娴嬭瘯
+        auto* frame = new tsl::elm::OverlayFrame("Write Probe", "file writes");
         auto* list = new tsl::elm::List();
-        list->addItem(new tsl::elm::CategoryHeader("log probe"));
-        list->addItem(new tsl::elm::ListItem(
-            "nextendo.log", "written on open/close"));
-        list->addItem(new tsl::elm::ListItem(
-            "\u8bf7\u6253\u5f00\u540e\u6309 B \u9000\u51fa", "then read sdmc:/nextendo.log"));
+
+        list->addItem(new tsl::elm::CategoryHeader("results"));
+        for (const auto& row : run_probe()) {
+            list->addItem(new tsl::elm::ListItem(row.label, row.value));
+        }
+
         frame->setContent(list);
         return frame;
     }
@@ -33,35 +127,16 @@ public:
 
 class ProbeOverlay : public tsl::Overlay {
 public:
-    virtual void initServices() override
-    {
-        nextendo::diag("probe: initServices enter");
-
-        // A plain write of a known string, so a readable file also proves
-        // ordinary file I/O rather than only appends.
-        FILE* marker = std::fopen("sdmc:/nextendo-probe.txt", "w");
-        if (marker != nullptr) {
-            std::fputs("write ok\n", marker);
-            std::fclose(marker);
-            nextendo::diag("probe: plain write ok");
-        } else {
-            nextendo::diag("probe: plain write FAILED");
-        }
-
-        nextendo::diag("probe: initServices exit");
-    }
-
-    virtual void exitServices() override
-    {
-        nextendo::diag("probe: exitServices enter");
-        nextendo::diag("probe: exitServices exit");
-    }
+    virtual void initServices() override {}
+    virtual void exitServices() override {}
 
     virtual std::unique_ptr<tsl::Gui> loadInitialGui() override {
         return initially<ProbeGui>();
     }
 };
 
-int main(int argc, char **argv) {
+}  // namespace
+
+int main(int argc, char** argv) {
     return tsl::loop<ProbeOverlay>(argc, argv);
 }
