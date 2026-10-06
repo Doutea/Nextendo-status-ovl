@@ -41,18 +41,21 @@ public:
 
     virtual void exitServices() override
     {
-        // Deliberately does NOT close anything.
+        // Intentionally empty, and deliberately so.
         //
-        // smExit() was here to balance the smInitialize() above, but closing that
-        // session on the way out is what crashes the loader, so the reference is
-        // simply left open. The overlay is unmapped the moment main() returns and
-        // libnx's own exit path closes sm: anyway, so nothing leaks and there is
-        // nothing to balance.
+        // NX-FanControl unmounts here because its initServices() mounted
+        // (fsdevMountSdmc). This overlay never mounts anything - it reads nothing
+        // from disk - so unmounting would be an unmatched call that tears down the
+        // loader's own view of the SD card. That matches the failure this overlay
+        // was hitting: nx-ovlloader dying right after the overlay closed with an
+        // Atmosphère fatal 2347-0004, which is its own fsFileRead of the next NRO
+        // failing. libnx's exit path already calls fsdevUnmountAll() itself
+        // (nx/source/runtime/init.c).
         //
-        // socketExit() is left out for the same reason: it made nx-ovlloader fail
-        // right afterwards with an Atmosphère fatal 2347-0004 (its own read of the
-        // next NRO returning an error).
-        fsdevUnmountAll();
+        // Nothing else is closed here either. sm: and the socket stack stay up:
+        // the overlay is unmapped the moment main() returns, so nothing left
+        // behind is reachable, and closing either one on the way out is what
+        // broke the loader.
     }
 
     virtual std::unique_ptr<tsl::Gui> loadInitialGui() override {
