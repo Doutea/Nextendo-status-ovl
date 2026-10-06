@@ -204,13 +204,20 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #---------------------------------------------------------------------------------
 all	:	$(OUTPUT).ovl
 
-# An overlay is an NRO with the .ovl extension. The trailing 'ULTR' marker is
-# appended on purpose: it is the signature Ultrahand looks for to treat the
-# binary as its own, and without it Ultrahand may hide the overlay entirely.
-$(OUTPUT).ovl		:	$(OUTPUT).elf
+# An overlay is an NRO with the .ovl extension.
+#
+# The .nacp prerequisite is essential, not cosmetic: `--nacp=` is passed to
+# elf2nro below, and switching it off produced an NRO with no asset header at
+# all, which made Ultrahand skip the file entirely (its getOverlayInfo() reads
+# the overlay name from that NACP). Listing it here is what triggers
+# switch_rules' `%.nacp` rule to actually generate it.
+#
+# The trailing 'ULTR' marker is the signature Ultrahand looks for to treat the
+# binary as a libultrahand overlay.
+$(OUTPUT).ovl		:	$(OUTPUT).elf $(OUTPUT).nacp
 	@elf2nro $< $@ $(NROFLAGS)
 	@printf 'ULTR' >> $@
-	@echo "built ... $(notdir $(OUTPUT).ovl) (Ultrahand signature appended)"
+	@echo "built ... $(notdir $(OUTPUT).ovl) (NACP embedded, Ultrahand signature appended)"
 
 $(OUTPUT).elf	:	$(OFILES)
 
