@@ -28,14 +28,16 @@ TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libnx/switch_rules
 
 #---------------------------------------------------------------------------------
-# TARGET is the name of the output
-# BUILD is the directory where object files & intermediate files will be placed
-# SOURCES is a list of directories containing source code
-# DATA is a list of directories containing data files
-# INCLUDES is a list of directories containing header files
+# NACP is REQUIRED, not optional.
 #
-# NO_ICON: overlays are never listed by hbmenu, so no icon is needed.
-# NO_NACP: skip the .nacp as well; it is only read by the homebrew menu.
+# Ultrahand's getOverlayInfo() reads the NACP resource that elf2nro appends after
+# the NRO and takes the overlay's display name and version from it. If the NACP
+# is missing it returns ResultParseError and the overlay is skipped entirely -
+# it never appears in the menu at all. (NO_NACP := 1 was set here originally on
+# the mistaken assumption that NACP only matters to hbmenu.)
+#
+# An icon is not required: elf2nro falls back to libnx's default_icon.jpg when
+# none is supplied.
 #---------------------------------------------------------------------------------
 APP_TITLE	:=	Nextendo
 APP_AUTHOR	:=	Nextendo Overlay
@@ -48,7 +50,6 @@ DATA		:=	data
 INCLUDES	:=	include source
 
 NO_ICON		:=	1
-NO_NACP		:=	1
 
 # Pulls libultrahand's sources and headers into SOURCES / INCLUDES.
 include $(TOPDIR)/libs/libultrahand/ultrahand.mk
