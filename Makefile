@@ -159,7 +159,7 @@ $(BUILD):
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).ovl $(TARGET).nro $(TARGET).nacp $(TARGET).elf
+	@rm -fr $(BUILD) $(TARGET).ovl $(TARGET).nro $(TARGET).nacp $(TARGET).elf out $(TARGET)-sd.zip
 
 #---------------------------------------------------------------------------------
 # Host-side unit tests for the JSON parser (no devkitA64 needed).
@@ -168,11 +168,17 @@ clean:
 test:
 	@$(MAKE) --no-print-directory -C tests run
 
+# A zip laid out exactly as it should be copied onto the SD card root:
+#   switch/.overlays/nextendo-ovl.ovl
+# Built here rather than externally so the archive entries use forward slashes,
+# which the console's extractor and every desktop tool handle correctly.
 dist: all
+	@rm -rf out
 	@mkdir -p out/switch/.overlays
 	@cp $(TARGET).ovl out/switch/.overlays/
-	@cd out && zip -qr ../$(TARGET).zip switch
-	@echo "built ... $(TARGET).zip"
+	@rm -f $(TARGET)-sd.zip
+	@cd out && zip -qr ../$(TARGET)-sd.zip switch
+	@echo "built ... $(TARGET)-sd.zip"
 
 #---------------------------------------------------------------------------------
 else
