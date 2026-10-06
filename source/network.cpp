@@ -213,58 +213,31 @@ FetchJob::~FetchJob() {
     cancel();
 }
 
-void FetchJob::thread_entry(void* self) {
-    debug_log("worker: entered");
-    static_cast<FetchJob*>(self)->run();
-}
-
 void FetchJob::start() {
     debug_log("start: begin");
     if (state_.load(std::memory_order_acquire) == FetchState::Running) {
         debug_log("start: already running");
         return;
     }
-    cancel();  // join any finished worker before reusing the object
-    debug_log("start: previous worker joined");
 
     abort_.store(false, std::memory_order_relaxed);
     published_ = FetchOutcome{};
     state_.store(FetchState::Running, std::memory_order_release);
 
-    // Priority 0x2C and core -2 (any core) match what libtesla uses for its own
-    // background poller, so this can never starve the render thread.
-    const Result rc = threadCreate(&thread_, &FetchJob::thread_entry, this, nullptr,
-                                   kStackSize, 0x2C, -2);
-    if (R_FAILED(rc)) {
-        debug_log("start: threadCreate FAILED");
-        FetchOutcome failed;
-        failed.state = FetchState::Failed;
-        failed.error = "could not start worker thread";
-        published_ = failed;
-        state_.store(FetchState::Failed, std::memory_order_release);
-        return;
-    }
-    debug_log("start: threadCreate ok");
-
-    thread_created_ = true;
-
-    if (R_FAILED(threadStart(&thread_))) {
-        debug_log("start: threadStart FAILED");
-        threadClose(&thread_);
-        thread_created_ = false;
-
-        FetchOutcome failed;
-        failed.state = FetchState::Failed;
-        failed.error = "could not start worker thread";
-        published_ = failed;
-        state_.store(FetchState::Failed, std::memory_order_release);
-        return;
-    }
-    debug_log("start: thread started");
+    // Synchronous on purpose.
+    //
+    // The worker-thread version crashed the loader process on close
+    // (Atmosphère fatal 2347-0004, PC=0) while the probe that performs the same
+    // network work without a thread closed cleanly, which pointed at
+    // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
+    // request inline removes that whole code path; the cost is that the panel
+    // cannot animate while a request is in flight, which the short timeouts in
+    // get() keep to a few seconds at worst.
+    run();
+    debug_log("start: done");
 }
 
 void FetchJob::run() {
-    debug_log("worker: run begin");
     FetchOutcome outcome;
 
     // The `sm:` session that name resolution needs is held open for the whole
@@ -327,21 +300,10 @@ FetchOutcome FetchJob::result() const {
 }
 
 void FetchJob::cancel() {
-    debug_log("cancel: begin");
+    // With the request running inline there is no thread to join. The abort flag
+    // is still honoured: it is read by curl's progress callback, so closing the
+    // overlay mid-transfer stops it at the next callback.
     abort_.store(true, std::memory_order_relaxed);
-    if (!thread_created_) {
-        debug_log("cancel: no thread");
-        return;
-    }
-
-    // The worker checks the abort flag through curl's progress callback, so the
-    // join returns promptly instead of waiting out the transfer timeout.
-    debug_log("cancel: waiting for worker");
-    threadWaitForExit(&thread_);
-    debug_log("cancel: worker exited, closing");
-    threadClose(&thread_);
-    thread_created_ = false;
-    debug_log("cancel: done");
 }
 
 }  // namespace nextendo
