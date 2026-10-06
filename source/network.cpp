@@ -2,6 +2,7 @@
 
 #include <curl/curl.h>
 
+#include <cstdio>
 #include <cstring>
 
 namespace nextendo {
@@ -19,6 +20,17 @@ struct BodySink {
     std::string data;
     bool overflowed = false;
 };
+
+// libnx's last bsd:/sfdnsres result, which pinpoints why name resolution or a
+// transfer failed. curl only reports the generic "Couldn't resolve host name",
+// which is not enough to tell a DNS refusal from a stalled transfer.
+std::string last_socket_result_text() {
+    const Result rc = socketGetLastResult();
+    if (R_SUCCEEDED(rc)) return {};
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), " (bsd 0x%08X)", static_cast<unsigned>(rc));
+    return buf;
+}
 
 std::size_t write_callback(char* ptr, std::size_t size, std::size_t nmemb, void* userdata) {
     auto* sink = static_cast<BodySink*>(userdata);
@@ -88,6 +100,9 @@ CURLcode get(const char* url, BodySink& sink, long& http_status,
             error = "cancelled";
         } else {
             error = curl_easy_strerror(rc);
+            // Append libnx's own result code when there is one: it separates a
+            // DNS failure from a stalled or refused connection.
+            error += last_socket_result_text();
         }
     }
     return rc;
@@ -99,35 +114,42 @@ bool services_init() {
     ++g_service_users;
     if (g_services_up) return true;
 
-    // Do NOT use socketInitializeDefault() here.
+    // Socket buffer tuning. Both extremes fail, so the values below are chosen
+    // against libnx's actual memory formula.
     //
-    // The library defaults are sized for a general-purpose application:
-    //   tcp_tx_buf_max 0x40000 + tcp_rx_buf_max 0x40000 + udp_tx 0x2400 +
-    //   udp_rx 0xA500, multiplied by sb_efficiency 4
-    // which reserves roughly 1.33 MB of TransferMemory. The overlay heap is
-    // capped at 4 MB by nx-ovlloader, and this overlay's own image is already
-    // ~1.8 MB, so the default reservation exhausted the heap and the overlay
-    // died on launch (Atmosphère fatal 2345-0002, PC=0).
+    // libnx computes the TransferMemory it hands to bsd: as
+    //     sb_efficiency * page_align(tcp_tx_buf_max + tcp_rx_buf_max
+    //                                + udp_tx_buf + udp_rx_buf)
+    // and documents (nx/source/services/bsd.c) that if that memory is too small
+    // "the BSD sockets service would only send ZeroWindow packets (for TCP),
+    // resulting in a transfer rate not exceeding 1 byte/s".
     //
-    // A single short HTTPS GET with a few-kilobyte response needs far less.
-    // Starting from the defaults keeps every other field correct if libnx adds
-    // any; only the memory numbers are overridden.
+    //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
+    //               -> exhausted the 4 MB overlay heap, the overlay died on
+    //                  launch with Atmosphère fatal 2345-0002.
+    //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
+    //               -> heap was fine, but every transfer stalled and name
+    //                  resolution failed with "Couldn't resolve host name".
+    //
+    // Anything above the formula's minimum is acceptable; the sizes here give
+    // 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB, which leaves well
+    // over a megabyte of the heap free for libtesla's renderer and fonts.
     SocketInitConfig socket_config = *socketGetDefaultInitConfig();
     socket_config.tcp_tx_buf_size = 0x2000;
-    socket_config.tcp_rx_buf_size = 0x2000;
-    socket_config.tcp_tx_buf_max_size = 0x8000;
-    socket_config.tcp_rx_buf_max_size = 0x8000;
-    socket_config.udp_tx_buf_size = 0x800;
-    socket_config.udp_rx_buf_size = 0x1000;
-    socket_config.sb_efficiency = 1;
+    socket_config.tcp_rx_buf_size = 0x4000;
+    socket_config.tcp_tx_buf_max_size = 0x2000;
+    socket_config.tcp_rx_buf_max_size = 0x10000;
+    socket_config.udp_tx_buf_size = 0x1000;
+    socket_config.udp_rx_buf_size = 0x4000;
+    socket_config.sb_efficiency = 2;
 
     if (R_FAILED(socketInitialize(&socket_config))) {
         --g_service_users;
         return false;
     }
 
-    // Not required for DNS (the resolver uses sfdnsres), but it lets us fail
-    // fast and gives curl the proxy settings from the console's profile.
+    // Not required for name resolution (that goes through sfdnsres), but it
+    // lets a request fail fast when the console is offline or has no profile.
     nifmInitialize(NifmServiceType_User);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
