@@ -6,10 +6,29 @@
 #   docker run --rm -v "$PWD:/work" -w /work devkitpro/devkita64:latest bash scripts/build.sh
 set -euo pipefail
 
+# The devkitPro images only put $DEVKITPRO/tools/bin on PATH, which is not
+# enough: the cross compiler, the target binutils and the portlibs live in
+# sibling directories. Source the environment the image ships, falling back to
+# adding the directories explicitly.
+if [ -f "$DEVKITPRO/dkp-env/switchvars.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$DEVKITPRO/dkp-env/switchvars.sh"
+elif [ -f "$DEVKITPRO/switchvars.sh" ]; then
+    # shellcheck disable=SC1091
+    source "$DEVKITPRO/switchvars.sh"
+fi
+
+export DEVKITPRO="${DEVKITPRO:-/opt/devkitpro}"
+export DEVKITARM="${DEVKITARM:-$DEVKITPRO/devkitARM}"
+export DEVKITA64="${DEVKITA64:-$DEVKITPRO/devkitA64}"
+export PATH="$DEVKITA64/bin:$DEVKITPRO/tools/bin:$DEVKITPRO/portlibs/switch/bin:$PATH"
+
 echo "==> toolchain"
-echo "DEVKITPRO=${DEVKITPRO:-<unset>}"
+echo "DEVKITPRO=$DEVKITPRO"
+command -v aarch64-none-elf-gcc
 aarch64-none-elf-gcc --version | head -n 1
 make --version | head -n 1
+command -v elf2nro
 
 # devkitpro/devkita64 already ships switch-dev and switch-portlibs (which
 # includes switch-curl and switch-zlib), so this is normally a no-op. It is kept
