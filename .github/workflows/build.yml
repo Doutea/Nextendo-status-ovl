@@ -54,3 +54,16 @@ jobs:
           name: probe-ovl
           path: probe/probe-ovl.ovl
           if-no-files-found: error
+
+      # Same idea, but for the network path: reports the exact libnx result
+      # codes for DNS, connect and TLS so a failure is not just "couldn't
+      # resolve host name".
+      - name: Build network probe
+        run: bash scripts/build_netprobe.sh
+
+      - name: Upload network probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: netprobe-ovl
+          path: netprobe/netprobe-ovl.ovl
+          if-no-files-found: error
