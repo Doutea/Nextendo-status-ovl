@@ -65,12 +65,17 @@ make
 
 ### 云端（GitHub Actions）
 
-推代码即自动编译，`.ovl` 在 Actions 的 **Artifacts** 里下载。工作流见 `.github/workflows/build.yml`，实际构建步骤在 `scripts/build.sh`（也可以在本地用同样的命令跑）。
+推代码即自动编译，产物在 Actions 的 **Artifacts** 里：
+
+- `nextendo-ovl` —— 单独的 `nextendo-ovl.ovl`
+- `nextendo-ovl-sd` —— `nextendo-ovl-sd.zip`，已是可直接拷到 SD 卡根目录的 `switch/.overlays/` 结构
 
 工作流分两个 job：
 
 - `test`：在普通 Linux 上用 ASan/UBSan 跑 JSON 解析器单测 —— **这是真正的质量闸门**；
-- `build`：在 `devkitpro/devkita64` 容器里装 `switch-curl`/`switch-zlib` 并编译出 `.ovl`，同时校验产物头部魔数确实是 `NRO0`。
+- `build`：在 `devkitpro/devkita64` 容器里编译出 `.ovl`，校验头部魔数（注意 `NRO0` 在**偏移 16**，偏移 0 是 AArch64 跳转指令），再打包出 SD 卡结构。
+
+> 踩过的坑记录在案，方便以后排查：构建脚本里不要写 `gcc --version | head -n 1`（配合 `set -o pipefail` 会因 SIGPIPE 报 exit 141）；容器内必须先 `source switchvars.sh` 并把 `$DEVKITPRO/devkitA64/bin` 加进 PATH，否则找不到交叉编译器；`-fno-rtti` **不能**开（libtesla 自己用了 `dynamic_cast`）。
 
 ---
 
@@ -118,16 +123,17 @@ make -C tests run     # 需要 g++/clang++，会启用 ASan/UBSan
 
 诚实地说明当前状态：
 
-**已在本地实测通过：**
+**已实测通过：**
 
-- 接口行为：`/api/online-counts` 返回 200、公开、无需鉴权，并用真实响应验证了 `sum(jeux)` 与 `sum(counts)` 的差异；
-- JSON 解析器：`make -C tests run`，53 项断言全部通过（含 UTF-8 重音字符、`\uXXXX` 代理对、未知字段容错、截断与语法错误区分、负数/异常值钳制、越界读取防护）。
+- **接口行为**：`/api/online-counts` 返回 200、公开、无需鉴权，并用真实响应验证了 `sum(jeux)` 与 `sum(counts)` 的差异（47 vs 49）；
+- **JSON 解析器**：53 项断言全部通过（含 UTF-8 重音字符、`\uXXXX` 代理对、未知字段容错、截断与语法错误区分、负数/异常值钳制、越界读取防护）。本地跑过，也在 CI 的 ASan/UBSan 下通过；
+- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 编译链接成功，产物 782,336 字节，`HOMEBREW` + `NRO0` 头部魔数校验通过。
 
 **尚未验证：**
 
-- **`.ovl` 的一次完整交叉编译尚未在真机/本机跑过。** 这台开发机上没有 devkitPro、Docker 或可用的 WSL 发行版，所以 Switch 目标代码（`main.cpp` / `gui.cpp` / `network.cpp`）只做了接口级核对，未经编译器验证。请先跑一次 GitHub Actions（或本地 `make`）确认；`scripts/build.sh` 会在产物不是合法 NRO 时直接失败。
-- **未在真机运行过。** 网络路径（libnx `ssl` 服务能否与 Cloudflare 的握手协商成功）、Tesla 的唤出与焦点行为都需要上机确认。
+- **未在真机上运行过。** 网络路径（libnx 的 `ssl` 服务能否与 Cloudflare 成功握手）、Tesla 的唤出组合键与焦点行为，都需要上机确认。首次运行建议在游戏里唤出后先按 `X` 手动刷新一次，观察是否能拿到数据。
 - **libtesla 上游自 2024-05 起未再更新。** 大气层 1.10 / HOS 21+ 改动了 userland↔kernel 的 TLS ABI，要求所有自制程序用新 libnx（≥4.10.0）重新编译。本项目只带 libtesla 的两个头文件、每次都在 CI 用最新 libnx 重新编译，因此通常没问题；若在 HOS 21+ 上出现异常，替代方案是换成仍在维护的 libultrahand（接口兼容，但要多依赖 curl/zlib/minizip/mbedtls）。
+- **若 TLS 握手失败**（可能表现为 "SSL connect error"）：说明该主机/固件组合下 `ssl` 服务的证书校验未通过。可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
 
 ---
 
