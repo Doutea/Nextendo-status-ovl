@@ -1,0 +1,29 @@
+name: build-fanbase
+
+# Builds the NX-FanControl-based overlay. Kept as its own workflow so it can run
+# independently of the older implementation's build while it is being validated.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fancontrol-base/**'
+      - 'scripts/build_fanbase.sh'
+      - '.github/workflows/fanbase.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: bash scripts/build_fanbase.sh
+
+      - name: Upload .ovl
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextendo-fanbase-ovl
+          path: nextendo-ovl.ovl
+          if-no-files-found: error
