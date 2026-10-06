@@ -116,14 +116,23 @@ bool services_init() {
     ++g_service_users;
     if (g_services_up) return true;
 
-    // DIAGNOSTIC: no socket, no nifm, no curl global state.
+    // Socket initialisation, using libnx's stock configuration.
     //
-    // Closing the overlay makes nx-ovlloader fail immediately afterwards with
-    // Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4) - its own fsFileRead
-    // of the next NRO returning an error. That happens whether or not the network
-    // stack is torn down on exit, so the open question is whether merely
-    // INITIALISING it is what breaks the loader. With this body the panel still
-    // renders; if the exit crash disappears, the network services are the cause.
+    // Earlier revisions passed a hand-tuned SocketInitConfig that shrank the
+    // buffers to fit the 4 MB overlay heap. Every variant of that was tried -
+    // from the library defaults (~2.20 MB of TransferMemory, which exhausted the
+    // heap and made the overlay die on launch) down to a minimal ~70 KB (which
+    // fell below libnx's documented minimum and stalled all transfers) - and the
+    // overlay crashed the loader on exit regardless. This build uses the stock
+    // config with no overrides at all, to find out whether the custom values are
+    // what the loader trips over.
+    if (R_FAILED(socketInitializeDefault())) {
+        --g_service_users;
+        return false;
+    }
+
+    nifmInitialize(NifmServiceType_User);
+
     g_services_up = true;
     return true;
 }
