@@ -43,10 +43,13 @@ else
 fi
 
 echo "==> building overlay"
-# Capture the output and print the tail afterwards: piping make straight into
-# head/tail would again trip pipefail on a build that actually succeeded.
+# `dist` builds the .ovl and then packages it as the SD-card layout
+# (switch/.overlays/nextendo-ovl.ovl) inside nextendo-ovl-sd.zip. Doing the zip
+# here on Linux keeps the archive entry names slash-separated.
+# The output is captured and printed afterwards: piping make straight into
+# head/tail would trip pipefail on a build that actually succeeded.
 set +e
-make -j"$(nproc)" 2>&1 | tee /tmp/build.log
+make -j"$(nproc)" dist 2>&1 | tee /tmp/build.log
 make_status=${PIPESTATUS[0]}
 set -e
 echo "--- last 60 lines of the build ---"
@@ -63,8 +66,15 @@ if [ ! -f nextendo-ovl.ovl ]; then
     exit 1
 fi
 
+if [ ! -f nextendo-ovl-sd.zip ]; then
+    echo "ERROR: nextendo-ovl-sd.zip was not produced" >&2
+    exit 1
+fi
+
 echo "==> result"
-ls -l nextendo-ovl.elf nextendo-ovl.ovl
+ls -l nextendo-ovl.elf nextendo-ovl.ovl nextendo-ovl-sd.zip
+echo "--- SD-card package contents ---"
+unzip -l nextendo-ovl-sd.zip
 
 # Validate the NRO header. The layout is:
 #   offset 0  : 4-byte AArch64 branch instruction (jumps past the header)
