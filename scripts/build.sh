@@ -63,6 +63,23 @@ if [ ! -f nextendo-ovl.ovl ]; then
     exit 1
 fi
 
+echo "==> inspecting artifacts"
+ls -l nextendo-ovl.elf nextendo-ovl.ovl || true
+echo "--- file(1) ---"
+file nextendo-ovl.elf nextendo-ovl.ovl || true
+echo "--- first 32 bytes of the .ovl ---"
+od -A d -t x1z -N 32 nextendo-ovl.ovl || true
+echo "--- first 32 bytes of the .elf ---"
+od -A d -t x1z -N 32 nextendo-ovl.elf || true
+echo "--- elf2nro run by hand, capturing its exit status ---"
+set +e
+elf2nro nextendo-ovl.elf /tmp/manual.ovl
+manual_status=$?
+set -e
+echo "elf2nro exit: $manual_status"
+ls -l /tmp/manual.ovl 2>/dev/null || true
+od -A d -t x1z -N 16 /tmp/manual.ovl 2>/dev/null || true
+
 # An .ovl is a libnx NRO with a different extension, so the magic must be NRO0.
 magic=$(head -c 4 nextendo-ovl.ovl)
 if [ "$magic" != "NRO0" ]; then
