@@ -3,11 +3,10 @@
 // Modeled on the parts of this repository's earlier network.cpp that were proven
 // on hardware, reduced to what is actually needed:
 //
-//   * the `sm:` session is opened around the request only;
-//   * the socket stack is never touched - socketInitialize() already reports
-//     LibnxError_AlreadyInitialized in this process, so it belongs to somebody
-//     else, and calling socketExit() on it made nx-ovlloader fail right after
-//     the overlay closed.
+//   * the socket stack is initialised once per fetch (and never closed - see
+//     the note in fetch_and_store());
+//   * the `sm:` session is opened around the request only, because the resolver
+//     initialises lazily and needs it at that moment.
 //
 // Two endpoints are queried, matching the website's status page: the counts, and
 // a small health check so the panel can say whether the backend is up.
@@ -89,6 +88,27 @@ const Outcome& outcome() {
 void fetch_and_store() {
     Outcome result;
     result.attempted = true;
+
+    // The socket stack is brought up here.
+    //
+    // libnx reports LibnxError_AlreadyInitialized, but that only means a "soc:"
+    // device is already registered in this process - it does not mean the stack
+    // is usable. The build that displayed data contained this call (and simply
+    // carried on past AlreadyInitialized); every build without it produced no
+    // numbers, so it is kept.
+    //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB,
+    //              which exhausts the overlay heap.
+    //   tiny     : below libnx's documented minimum, so transfers stall.
+    // The values below give 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB.
+    SocketInitConfig socket_config = *socketGetDefaultInitConfig();
+    socket_config.tcp_tx_buf_size = 0x2000;
+    socket_config.tcp_rx_buf_size = 0x4000;
+    socket_config.tcp_tx_buf_max_size = 0x2000;
+    socket_config.tcp_rx_buf_max_size = 0x10000;
+    socket_config.udp_tx_buf_size = 0x1000;
+    socket_config.udp_rx_buf_size = 0x4000;
+    socket_config.sb_efficiency = 2;
+    socketInitialize(&socket_config);
 
     // The resolver (sfdnsres) initialises on first use and needs `sm:` at that
     // moment. Fetching from createUI() runs outside libtesla's doWithSmSession,
