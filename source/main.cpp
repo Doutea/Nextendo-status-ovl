@@ -32,9 +32,10 @@ public:
     }
 
     void onShow() override {
-        // Fetch once per open. start() returns once the request has settled, so
-        // nothing keeps running while the overlay is hidden.
-        if (g_servicesOk) g_fetchJob.start();
+        // The transfer runs in GuiMain::createUI(), which libtesla calls after
+        // initScreen() and before the panel is drawn. Fetching here instead was
+        // tried and the panel came up empty, because onShow() runs later than
+        // the Gui's construction.
     }
 
     void onHide() override {
