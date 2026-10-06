@@ -1,13 +1,15 @@
-name: build-fanbase
+name: fanbase
 
-# Builds the NX-FanControl-based overlay. Kept as its own workflow so it can run
-# independently of the older implementation's build while it is being validated.
+# Builds the NX-FanControl-based overlay plus the log probe used to diagnose its
+# exit-time crash.
 on:
   push:
     branches: [main]
     paths:
       - 'fancontrol-base/**'
+      - 'diagprobe/**'
       - 'scripts/build_fanbase.sh'
+      - 'scripts/build_diagprobe.sh'
       - '.github/workflows/fanbase.yml'
   workflow_dispatch:
 
@@ -18,12 +20,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build
+      - name: Build overlay
         run: bash scripts/build_fanbase.sh
 
-      - name: Upload .ovl
+      - name: Upload overlay
         uses: actions/upload-artifact@v4
         with:
           name: nextendo-fanbase-ovl
           path: nextendo-ovl.ovl
+          if-no-files-found: error
+
+      # The probe exists because every earlier attempt to capture a diagnostic
+      # log from the overlay produced no file. It proves the SD-card write works
+      # from the same call sites the real log would use.
+      - name: Build log probe
+        run: bash scripts/build_diagprobe.sh
+
+      - name: Upload log probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextendo-diagprobe-ovl
+          path: nextendo-diagprobe.ovl
           if-no-files-found: error
