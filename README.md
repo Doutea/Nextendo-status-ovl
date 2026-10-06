@@ -134,19 +134,18 @@ make -C tests run     # 需要 g++/clang++，会启用 ASan/UBSan
 **已实测通过：**
 
 - **接口行为**：`/api/online-counts` 返回 200、公开、无需鉴权，并用真实响应验证了 `sum(jeux)` 与 `sum(counts)` 的差异（47 vs 49）；
-- **JSON 解析器**：53 项断言全部通过（含 UTF-8 重音字符、`\uXXXX` 代理对、未知字段容错、截断与语法错误区分、负数/异常值钳制、越界读取防护）。本地跑过，也在 CI 的 ASan/UBSan 下通过；
-- **完整交叉编译**：在 `devkitpro/devkita64` 容器里用 devkitA64 + libtesla 编译链接成功；
-- **产物格式校验**：`HOMEBREW` + `NRO0` 头部魔数正确、含 `ASET` 资源头与 NACP，尾部资源大小（16,440 字节）与实测可用的 FPSLocker 完全一致；
-- **菜单可见性**：已由真机确认能在 Ultrahand 菜单中列出并启动（此前缺 NACP 时完全不显示）。
+- **JSON 解析器**：53 项断言全部通过（本地 + CI 的 ASan/UBSan）；
+- **完整交叉编译**：`devkitpro/devkita64` 容器内用 devkitA64 + libtesla 编译链接成功；
+- **产物格式**：`HOMEBREW`/`NRO0` 魔数、`ASET` 资源头与 NACP 齐备，尾部资源大小与实测可用的 FPSLocker 一致；
+- **真机可启动**：已在 HOS 22.5.0 / AMS 1.11.2 的 Ultrahand 菜单中成功列出并打开（不再崩溃）。
 
-**尚未验证 / 已知问题：**
+**关键教训（socket 内存）：** `socketInitializeDefault()` 的默认配置会申请约 **2.20 MB** TransferMemory，在加载器 4MB 堆下**直接导致启动崩溃**（fatal `2345-0002`）。但把它压到 72 KB 又会因 libnx 的 ZeroWindow 机制让传输速率降到 ≤1 字节/秒，表现为 DNS 解析失败（`Couldn't resolve host name`）。现在取 **184 KB**（`2 × page_align(0x2000+0x10000+0x1000+0x4000)`），两侧问题都避开。计算依据见 libnx `nx/source/services/bsd.c` 的 `_bsdGetTransferMemSizeForConfig()`。
 
-- **启动后崩溃，尚未修复。** 真机日志为 Atmosphère fatal `2345-0002 (0x559)`，`Program: 420000000007E51A`（nx-ovlloader 进程），`PC = 0`，寄存器全零。这发生在 overlay 被识别并启动之后。
-  - 已排除：NRO 头与分段表（与可用文件结构一致）、NACP 缺失、文件命名与路径。
-  - 已尝试并失败的方案：改用 libultrahand 并追加 `ULTR` 签名（同样崩溃）。
-  - 下一步：用 `probe/` 探针二分定位，见上文。
-- **未在真机上验证过联网取数。** 网络路径（libnx 的 `ssl` 服务与 Cloudflare 握手）仍需上机确认。
+**尚未验证 / 待确认：**
+
+- **联网取数尚未成功。** 真机首测报 `Couldn't resolve host name`（即上文的缓冲过小所致）。本次调整缓冲后需要重新上机确认；如果仍失败，界面现在会附加 libnx 的 bsd 结果码（形如 `(bsd 0xXXXXXXXX)`），可据此区分 DNS、连接还是 TLS 失败。
 - **若 TLS 握手失败**（表现为 `SSL connect error`）：可改用 libnx 原生 `ssl` API 自行控制校验选项，或换用 `switch-mbedtls` 自带信任库。
+- **界面有排版瑕疵**：行文字会被裁切/重叠，疑似 libtesla 在 HID 层之上的奇偶行渲染 glitch，不影响功能，待功能确认后处理。
 
 ---
 
