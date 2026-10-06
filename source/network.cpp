@@ -128,7 +128,7 @@ bool services_init() {
     //
     //   defaults : 4 * page_align(0x40000+0x40000+0x2400+0xA500) = ~2.20 MB
     //               -> exhausted the 4 MB overlay heap, the overlay died on
-    //                  launch with an Atmosph猫re fatal 2345-0002.
+    //                  launch with an Atmosphère fatal 2345-0002.
     //   tiny     : 1 * page_align(0x8000+0x8000+0x800+0x1000)    = ~70 KB
     //               -> below the threshold, so every transfer stalled.
     //
@@ -181,7 +181,7 @@ void services_exit() {
     //
     // Closing the overlay ran curl_global_cleanup(), nifmExit() and socketExit()
     // here, and doing so made the loader fail immediately afterwards with
-    // an Atmosph猫re fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
+    // an Atmosphère fatal 2347-0004 (Module_HomebrewLoader, 4) - that is
     // nx-ovlloader's own `fsFileRead` of the next NRO returning an error or zero
     // bytes. The overlay is unmapped straight after this returns, so nothing it
     // leaves behind can be observed, and overlays that are known to work on this
@@ -213,7 +213,7 @@ void FetchJob::start() {
     // Synchronous on purpose.
     //
     // The worker-thread version crashed the loader process on close
-    // (an Atmosph猫re fatal 2347-0004, PC=0) while the probe that performs the same
+    // (an Atmosphère fatal 2347-0004, PC=0) while the probe that performs the same
     // network work without a thread closed cleanly, which pointed at
     // threadCreate/threadWaitForExit/threadClose as the trigger. Running the
     // request inline removes that whole code path; the cost is that the panel
