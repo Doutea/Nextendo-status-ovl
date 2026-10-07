@@ -546,46 +546,77 @@ private:
 
 // Chinese names for the titles the API reports.
 //
-// Most of the API's names are long in English ("Super Smash Bros. Ultimate",
-// "METAL GEAR SOLID: Peace Walker - Master Collection Version") and were being
-// cut off by the row width. Nintendo's own Chinese names are shorter and are
-// what a Chinese-language console shows, so they are used where one exists.
+// GENERATED from the editable table - do not hand-edit this block; change
+// the table and regenerate it instead. Non-ASCII is written as \uXXXX so
+// this file carries no encoding dependency.
 //
-// Only the display name changes. The count still comes from the API by title id;
-// nothing here is used for matching.
+// Only the display name changes. Matching still uses the API's own name, which
+// is the key on the left.
 static const std::map<std::string, std::string> g_gameNamesZh = {
-    {"Super Smash Bros. Ultimate",                    "\u4efb\u5929\u5802\u5168\u660e\u661f\u5927\u4e71\u6597 \u7279\u522b\u7248"},
-    {"Mario Kart 8 Deluxe",                           "\u9a6c\u529b\u6b27\u8d5b\u8f66 8 \u8c6a\u534e\u7248"},
-    {"Super Mario Maker 2",                           "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5236\u9020 2"},
-    {"Minecraft Dungeons II",                         "\u6211\u7684\u4e16\u754c\uff1a\u5730\u7262 II"},
-    {"Crash Team Racing Nitro-Fueled",                "\u53e4\u60d1\u72fc\u8d5b\u8f66\u5b9d\u8d1d\u8f66"},
-    {"Splatoon 3",                                    "\u65af\u666e\u62c9\u901f 3"},
-    {"Pok\u00e9mon Scarlet",                          "\u5b9d\u53ef\u68a6\u6731"},
-    {"L\u00e9gendes Pok\u00e9mon : Z-A",              "\u5b9d\u53ef\u68a6\u4f20\u8bf4 Z-A"},
-    {"Nintendo 64 \u2013 Nintendo Classics",          "Nintendo 64 \u7ecf\u5178\u5408\u96c6"},
-    {"Minecraft: Nintendo Switch Edition",            "\u6211\u7684\u4e16\u754c\uff1aSwitch \u7248"},
-    {"Diablo III: Eternal Collection",                "\u6697\u9ed1\u7834\u574f\u795e III\uff1a\u6c38\u6052\u4e4b\u6218"},
-    {"POKK\u00c9N TOURNAMENT DX",                     "\u5b9d\u53ef\u62f3 DX"},
-    {"SUPER MARIO BROS. 35",                          "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5144\u5f1f 35"},
-    {"PAC-MAN 99",                                    "\u5403\u8c46\u4eba 99"},
-    {"Mario Tennis Aces",                             "\u9a6c\u529b\u6b27\u7f51\u7403 \u8d85\u7ea7\u6263\u6740"},
-    {"Overcooked! 2",                                 "\u80e1\u95f9\u53a8\u623f 2"},
-    {"Super Mario Odyssey",                           "\u8d85\u7ea7\u9a6c\u529b\u6b27 \u5965\u5fb7\u8d5b"},
-    {"TETRIS 99",                                     "\u4fc4\u7f57\u65af\u65b9\u5757 99"},
-    {"Super Mario Bros. Wonder",                      "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5144\u5f1f \u60ca\u5947"},
-    {"Saints Row: The Third - The Full Package",      "\u9ed1\u9053\u5723\u5f92 3\uff1a\u5b8c\u6574\u7248"},
-    {"Splatoon 2",                                    "\u65af\u666e\u62c9\u901f 2"},
-    {"Just Shapes & Beats",                           "\u5f62\u72b6\u4e0e\u97f3\u7b26"},
-    {"Luigi's Mansion 3",                             "\u8def\u6613\u5409\u9b3c\u5c4b 3"},
-    {"Clubhouse Games: 51 Worldwide Classics",        "\u4e16\u754c\u6e38\u620f\u5927\u5168 51"},
-    {"ARMS",                                          "ARMS"},
-    {"Animal Crossing: New Horizons",                 "\u52a8\u7269\u68ee\u53cb\u4f1a \u65b0\u5730\u5e73"},
-    {"Mario Party Superstars",                        "\u9a6c\u529b\u6b27\u6d3e\u5bf9 \u8d85\u7ea7\u661f\u661f"},
-    {"Mario Strikers: Battle League",                 "\u9a6c\u529b\u6b27\u8db3\u7403\uff1a\u8d85\u7ea7\u5dde\u9645\u8054\u8d5b"},
-    {"Mario Golf: Super Rush",                        "\u9a6c\u529b\u6b27\u9ad8\u5c14\u592b\uff1a\u8d85\u7ea7\u51b2\u523a"},
-    {"METAL GEAR SOLID: Peace Walker - Master Collection Version", "\u4e2d\u91d1\u88c5\u5907\u5e73\u884c\u8005\uff1a\u5927\u5e08\u5408\u96c6\u7248"},
-    {"MONSTER HUNTER GENERATIONS ULTIMATE",           "\u602a\u7269\u730e\u4eba XX"},
-    {"Pok\u00e9mon Violet",                           "\u5b9d\u53ef\u68a6\u7d2b"},
+    {"Super Smash Bros. Ultimate",
+     "\u4EFB\u5929\u5802\u5168\u660E\u661F\u5927\u4E71\u6597"},
+    {"Mario Kart 8 Deluxe",
+     "\u9A6C\u529B\u6B27\u8D5B\u8F66 8 \u8C6A\u534E\u7248"},
+    {"Super Mario Maker 2",
+     "\u8D85\u7EA7\u9A6C\u529B\u6B27\u5236\u9020 2"},
+    {"Minecraft Dungeons II",
+     "\u6211\u7684\u4E16\u754C\uFF1A\u5730\u7262 II"},
+    {"Crash Team Racing Nitro-Fueled",
+     "\u53E4\u60D1\u72FC\u8D5B\u8F66\u5B9D\u8D1D\u8F66"},
+    {"Splatoon 3",
+     "\u65AF\u666E\u62C9\u9041 3"},
+    {"Pok\u00E9mon Scarlet",
+     "\u5B9D\u53EF\u68A6 \u6731"},
+    {"L\u00E9gendes Pok\u00E9mon : Z-A",
+     "\u5B9D\u53EF\u68A6\u4F20\u8BF4 Z-A"},
+    {"Nintendo 64 \u2013 Nintendo Classics",
+     "Nintendo 64 \u7ECF\u5178\u5408\u96C6"},
+    {"Minecraft: Nintendo Switch Edition",
+     "\u6211\u7684\u4E16\u754C\uFF1ASwitch \u7248"},
+    {"Diablo III: Eternal Collection",
+     "\u6697\u9ED1\u7834\u574F\u795E III\uFF1A\u6C38\u6052\u4E4B\u6218"},
+    {"POKK\u00C9N TOURNAMENT DX",
+     "\u5B9D\u53EF\u62F3 DX"},
+    {"SUPER MARIO BROS. 35",
+     "\u8D85\u7EA7\u9A6C\u529B\u6B27\u5144\u5F1F 35"},
+    {"PAC-MAN 99",
+     "\u5403\u8C46\u4EBA 99"},
+    {"Mario Tennis Aces",
+     "\u9A6C\u529B\u6B27\u7F51\u7403 \u8D85\u7EA7\u6263\u6740"},
+    {"Overcooked! 2",
+     "\u80E1\u95F9\u53A8\u623F 2"},
+    {"Super Mario Odyssey",
+     "\u8D85\u7EA7\u9A6C\u529B\u6B27 \u5965\u5FB7\u8D5B"},
+    {"TETRIS 99",
+     "\u4FC4\u7F57\u65AF\u65B9\u5757 99"},
+    {"Super Mario Bros. Wonder",
+     "\u8D85\u7EA7\u9A6C\u529B\u6B27\u5144\u5F1F \u60CA\u5947"},
+    {"Saints Row: The Third - The Full Package",
+     "\u9ED1\u9053\u5723\u5F92 3\uFF1A\u5B8C\u6574\u7248"},
+    {"Splatoon 2",
+     "\u65AF\u666E\u62C9\u9041 2"},
+    {"Just Shapes & Beats",
+     "\u5F62\u72B6\u4E0E\u97F3\u7B26"},
+    {"Luigi's Mansion 3",
+     "\u8DEF\u6613\u5409\u9B3C\u5C4B 3"},
+    {"Clubhouse Games: 51 Worldwide Classics",
+     "\u4E16\u754C\u6E38\u620F\u5927\u5168 51"},
+    {"ARMS",
+     "ARMS"},
+    {"Animal Crossing: New Horizons",
+     "\u52A8\u7269\u68EE\u53CB\u4F1A"},
+    {"Mario Party Superstars",
+     "\u9A6C\u529B\u6B27\u6D3E\u5BF9 \u8D85\u7EA7\u5DE8\u661F"},
+    {"Mario Strikers: Battle League",
+     "\u9A6C\u529B\u6B27\u8DB3\u7403\uFF1A\u8D85\u7EA7\u5DDE\u9645\u8054\u8D5B"},
+    {"Mario Golf: Super Rush",
+     "\u9A6C\u529B\u6B27\u9AD8\u5C14\u592B\uFF1A\u8D85\u7EA7\u51B2\u523A"},
+    {"METAL GEAR SOLID: Peace Walker - Master Collection Version",
+     "\u5408\u91D1\u88C5\u5907\uFF1A\u548C\u5E73\u884C\u8005"},
+    {"MONSTER HUNTER GENERATIONS ULTIMATE",
+     "\u602A\u7269\u730E\u4EBA XX"},
+    {"Pok\u00E9mon Violet",
+     "\u5B9D\u53EF\u68A6 \u7D2B"},
 };
 
 // Falls back to the API's own name when no Chinese one is known, so a newly
@@ -601,7 +632,7 @@ public:
     GuiTest() = default;
 
     virtual tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame("Nextendo \u7f51\u7edc",       // Nextendo 网络
+        m_frame = new tsl::elm::OverlayFrame("Nextendo \u5728\u7ebf\u72b6\u6001",  // Nextendo 在线状态
                                              "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
         auto* list = new tsl::elm::List();
 
