@@ -84,6 +84,8 @@ std::vector<Row> probe() {
         setExit();
     }
 
+    g_probeChinese = chineseBySet || chineseByApplet;
+
     // 3. set:sys. It has no language getter at all, which is why using it for the
     //    check was wrong; this just confirms the service opens.
     const Result sysRc = setsysInitialize();
@@ -91,6 +93,14 @@ std::vector<Row> probe() {
     if (R_SUCCEEDED(sysRc)) setsysExit();
 
     return rows;
+}
+
+// Required by tesla.hpp, which needs a definition to link against. The probe
+// determines the language below and remembers it here.
+static bool g_probeChinese = false;
+
+extern "C" bool nextendoIsChinese() {
+    return g_probeChinese;
 }
 
 class ProbeGui : public tsl::Gui {
