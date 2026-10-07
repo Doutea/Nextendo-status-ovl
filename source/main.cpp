@@ -13,6 +13,69 @@
 #include <string>
 #include <algorithm>
 
+// ---------------------------------------------------------------------------
+// Language handling
+//
+// The console's system language decides the interface language. English is the
+// fallback for anything that is not Chinese: a non-Chinese console has no
+// Chinese font loaded by libtesla, so Chinese labels there would be unreadable
+// at best and rendered as missing glyphs at worst.
+//
+// Game names follow the same rule - the translation table is only consulted on a
+// Chinese console, otherwise the API's own name is shown. That keeps a game's
+// name accurate for the player's own locale instead of forcing a Chinese title.
+// ---------------------------------------------------------------------------
+
+static bool g_useChinese = false;
+
+// Set by the overlay's initServices(); read by both this translation unit and
+// tesla.hpp (see the footer hints there).
+void nextendoUseChinese(bool chinese) {
+    g_useChinese = chinese;
+}
+
+bool nextendoIsChinese() {
+    return g_useChinese;
+}
+
+// Turns the system language id into "is this a Chinese console?".
+static bool detectChineseLanguage() {
+    u64 languageCode = 0;
+    if (R_FAILED(setGetSystemLanguage(&languageCode))) return false;
+
+    SetLanguage language{};
+    if (R_FAILED(setMakeLanguage(languageCode, &language))) return false;
+
+    switch (language) {
+        case SetLanguage_ZHCN:
+        case SetLanguage_ZHHANS:
+        case SetLanguage_ZHTW:
+        case SetLanguage_ZHHANT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// One interface string in both languages. CH/EN are picked by T() at run time.
+struct UiText {
+    const char* zh;
+    const char* en;
+};
+
+static const UiText kTitle       = {"Nextendo \u5728\u7ebf\u72b6\u6001", "Nextendo Status"};
+static const UiText kLoading     = {"\u52a0\u8f7d\u4e2d\u2026", "\u2026"};
+static const UiText kSectionNow  = {"\u5f53\u524d\u72b6\u6001", "Current status"};
+static const UiText kPlayers     = {"\u5728\u7ebf\u4eba\u6570", "Players online"};
+static const UiText kGameCount   = {"\u6e38\u620f\u6570\u91cf", "Games played"};
+static const UiText kGameList    = {"\u6e38\u620f\u5217\u8868", "Game list"};
+static const UiText kWaiting     = {"\u7b49\u5f85\u6570\u636e\u2026", "Waiting for data\u2026"};
+static const UiText kUpdatedAt   = {"\u66f4\u65b0\u4e8e ", "Updated "};
+
+static const char* T(const UiText& text) {
+    return g_useChinese ? text.zh : text.en;
+}
+
 void debugLog(const std::string& msg) {
     mkdir("sdmc:/switch", 0777);
     mkdir("sdmc:/switch/nextendo-status", 0777);
@@ -619,9 +682,11 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
      "\u5B9D\u53EF\u68A6 \u7D2B"},
 };
 
-// Falls back to the API's own name when no Chinese one is known, so a newly
-// added title still shows up instead of disappearing.
+// Chinese name when the console is set to Chinese, otherwise the API's own
+// name. A non-Chinese console has no Chinese font loaded, and forcing a Chinese
+// title on it would be both unreadable and wrong for that player's locale.
 static std::string localisedName(const std::string& apiName) {
+    if (!nextendoIsChinese()) return apiName;
     auto it = g_gameNamesZh.find(apiName);
     return (it != g_gameNamesZh.end()) ? it->second : apiName;
 }
@@ -629,26 +694,25 @@ class GuiTest : public tsl::Gui {
 public:
     // No I/O here: fetching in the constructor is what made the panel take
     // seconds to appear. The polling thread does it, and the panel opens at once.
-    GuiTest() = default;
+    GuiTest() {
+        // Seed the count with the loading text; refreshUI() replaces it as soon
+        // as the polling thread publishes something.
+        m_totalText = T(kLoading);
+    }
 
     virtual tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame("Nextendo \u5728\u7ebf\u72b6\u6001",  // Nextendo 在线状态
-                                             "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
+        m_frame = new tsl::elm::OverlayFrame(T(kTitle), T(kLoading));
         auto* list = new tsl::elm::List();
 
-        // Section heading. The rule it draws is the divider above the panel's
-        // content, which is wanted here.
-        list->addItem(new tsl::elm::CategoryHeader(
-            "\u5f53\u524d\u72b6\u6001"));                                    // 当前状态
+        // Section heading. The rule it draws is the divider above the content.
+        list->addItem(new tsl::elm::CategoryHeader(T(kSectionNow)));
 
         // Players online. Selectable, and pressing A refreshes: this is the row
         // a user reaches for when the numbers look stale.
         //
         // A click listener must always be set, because Element::onClick() calls
         // it unconditionally and an empty std::function would abort.
-        m_totalItem = new tsl::elm::ListItem(
-            "\u5728\u7ebf\u4eba\u6570",                                       // 在线人数
-            m_totalText);
+        m_totalItem = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         m_totalItem->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
@@ -659,18 +723,14 @@ public:
         list->addItem(m_totalItem);
 
         // How many titles are currently being played.
-        m_gamesItem = new tsl::elm::ListItem(
-            "\u6e38\u620f\u6570\u91cf",                                       // 游戏数量
-            m_gamesText);
+        m_gamesItem = new tsl::elm::ListItem(T(kGameCount), m_gamesText);
         list->addItem(m_gamesItem);
 
-        // The list itself. This heading is also what separates the two blocks.
-        m_sectionHeader = new tsl::elm::CategoryHeader(
-            "\u6e38\u620f\u5217\u8868");                                     // 游戏列表
+        // The list itself. This heading also separates the two blocks.
+        m_sectionHeader = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(m_sectionHeader);
 
-        m_placeholder = new tsl::elm::ListItem(
-            "\u7b49\u5f85\u6570\u636e\u2026");                               // 等待数据…
+        m_placeholder = new tsl::elm::ListItem(T(kWaiting));
         list->addItem(m_placeholder);
 
         m_frame->setContent(list);
@@ -711,7 +771,7 @@ private:
                     it->second->setValue(std::to_string(j.players));
                 }
             }
-            m_sectionHeader->setText("\u6e38\u620f\u5217\u8868");            // 游戏列表
+            m_sectionHeader->setText(T(kGameList));
             return;
         }
 
@@ -719,10 +779,9 @@ private:
 
         auto* list = new tsl::elm::List();
 
-        list->addItem(new tsl::elm::CategoryHeader("\u5f53\u524d\u72b6\u6001"));  // 当前状态
+        list->addItem(new tsl::elm::CategoryHeader(T(kSectionNow)));
 
-        auto* total = new tsl::elm::ListItem("\u5728\u7ebf\u4eba\u6570",     // 在线人数
-                                             m_totalText);
+        auto* total = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         total->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
@@ -733,12 +792,11 @@ private:
         list->addItem(total);
         m_totalItem = total;
 
-        auto* games = new tsl::elm::ListItem("\u6e38\u620f\u6570\u91cf",     // 游戏数量
-                                             m_gamesText);
+        auto* games = new tsl::elm::ListItem(T(kGameCount), m_gamesText);
         list->addItem(games);
         m_gamesItem = games;
 
-        auto* section = new tsl::elm::CategoryHeader("\u6e38\u620f\u5217\u8868");  // 游戏列表
+        auto* section = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(section);
         m_sectionHeader = section;
 
@@ -802,19 +860,20 @@ private:
 
         // Subtitle: the console clock time at which these numbers were fetched.
         if (lastTick != 0) {
-            const std::string line =
-                "\u66f4\u65b0\u4e8e " + fetchClock(lastTick);                // 更新于
+            const std::string line = std::string(T(kUpdatedAt)) + fetchClock(lastTick);
             m_frame->setSubtitle(line.c_str());
         } else {
-            m_frame->setSubtitle(refreshing ? "\u52a0\u8f7d\u4e2d\u2026"     // 加载中…
-                                            : "\u7b49\u5f85\u6570\u636e\u2026");  // 等待数据…
+            m_frame->setSubtitle(refreshing ? T(kLoading) : T(kWaiting));
         }
 
         if (!haveData) {
-            m_totalText = refreshing ? "\u52a0\u8f7d\u4e2d\u2026"            // 加载中…
-                                     : (errCopy.empty()
-                                            ? std::string("\u7b49\u5f85\u6570\u636e\u2026")  // 等待数据…
-                                            : errCopy);
+            if (refreshing) {
+                m_totalText = T(kLoading);
+            } else if (!errCopy.empty()) {
+                m_totalText = errCopy;
+            } else {
+                m_totalText = T(kWaiting);
+            }
             m_gamesText = "--";
             if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
             if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText, true);
@@ -852,7 +911,7 @@ private:
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     tsl::elm::ListItem* m_placeholder = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
-    std::string m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
+    std::string m_totalText;
     std::string m_gamesText = "--";
     std::vector<std::string> m_shownNames;
 };
@@ -865,6 +924,9 @@ public:
         nifmInitialize(NifmServiceType_User);
         socketInitialize(&socketConfig);
         curl_global_init(CURL_GLOBAL_DEFAULT);
+        // Decide the interface language before anything is drawn.
+        nextendoUseChinese(detectChineseLanguage());
+
         mutexInit(&g_mutex);
 
         // Nothing here performs network I/O any more. The game-config download
