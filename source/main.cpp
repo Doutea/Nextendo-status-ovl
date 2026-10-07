@@ -91,7 +91,6 @@ static const UiText kTitle       = {"Nextendo \u5728\u7ebf\u72b6\u6001", "Nexten
 static const UiText kLoading     = {"\u52a0\u8f7d\u4e2d\u2026", "\u2026"};
 static const UiText kSectionNow  = {"\u5f53\u524d\u72b6\u6001", "Current status"};
 static const UiText kPlayers     = {"\u5728\u7ebf\u4eba\u6570", "Players online"};
-static const UiText kGameCount   = {"\u6e38\u620f\u5728\u7ebf", "Games online"};
 static const UiText kGameList    = {"\u6e38\u620f\u5217\u8868", "Game list"};
 static const UiText kRefreshing  = {"\u5237\u65b0\u4e2d\u2026", "Refreshing\u2026"};
 static const UiText kWaiting     = {"\u7b49\u5f85\u6570\u636e\u2026", "Waiting for data\u2026"};
@@ -803,10 +802,6 @@ public:
         });
         list->addItem(m_totalItem);
 
-        // How many titles are currently being played.
-        m_gamesItem = new tsl::elm::ListItem(T(kGameCount), m_gamesText);
-        list->addItem(m_gamesItem);
-
         // The list itself. This heading also separates the two blocks.
         m_sectionHeader = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(m_sectionHeader);
@@ -885,10 +880,6 @@ private:
         });
         list->addItem(total);
         m_totalItem = total;
-
-        auto* games = new tsl::elm::ListItem(T(kGameCount), m_gamesText);
-        list->addItem(games);
-        m_gamesItem = games;
 
         auto* section = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(section);
@@ -971,9 +962,7 @@ private:
             } else {
                 m_totalText = T(kWaiting);
             }
-            m_gamesText = "--";
             if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
-            if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText, true);
             // The game-list section stays empty here. It used to hold a row
             // repeating the count row's "waiting" text, which read as clutter.
             return;
@@ -999,7 +988,6 @@ private:
         // A refresh the user asked for is the exception: the count row shows
         // that the press was registered, then goes back to the number.
         m_totalText = std::to_string(total);
-        m_gamesText = std::to_string(jeux.size());
         rebuildGameRows(jeux);
 
         if (manualRefresh && m_totalItem != nullptr) {
@@ -1009,17 +997,14 @@ private:
         } else {
             applyValueColour(m_totalItem, m_totalText);
         }
-        applyValueColour(m_gamesItem, m_gamesText);
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
     tsl::elm::List* m_list = nullptr;
     tsl::elm::ListItem* m_totalItem = nullptr;
-    tsl::elm::ListItem* m_gamesItem = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
     std::string m_totalText;
-    std::string m_gamesText = "--";
     std::vector<std::string> m_shownNames;
 };
 class OverlayTest : public tsl::Overlay {
