@@ -38,14 +38,16 @@ bool nextendoIsChinese() {
     return g_useChinese;
 }
 
-// Inner half of the check, split out so the service is always closed again.
-static bool detectChineseLanguageInner() {
-    u64 languageCode = 0;
-    if (R_FAILED(setGetSystemLanguage(&languageCode))) return false;
-
-    SetLanguage language{};
-    if (R_FAILED(setMakeLanguage(languageCode, &language))) return false;
-
+// Reads the console's language.
+//
+// appletGetDesiredLanguage() comes first: libnx initialises the applet service
+// itself, and its own source notes that this call is preferred over
+// setGetLanguageCode because the latter can disagree with the system language.
+//
+// The `set:` fallback exists because setGetSystemLanguage() dispatches to
+// g_setSrv (nx/source/services/set.c), which nothing else opens for an overlay -
+// so it has to be opened and closed here.
+static bool isChineseLanguage(SetLanguage language) {
     switch (language) {
         case SetLanguage_ZHCN:
         case SetLanguage_ZHHANS:
@@ -57,20 +59,25 @@ static bool detectChineseLanguageInner() {
     }
 }
 
-// Turns the system language id into "is this a Chinese console?".
-//
-// set:sys has to be opened here. libnx's startup uses it briefly to read the
-// firmware version and then closes it again (nx/source/runtime/init.c), so by
-// the time initServices() runs the service is shut and every set* call fails -
-// which silently produced the English fallback on Chinese consoles.
+static bool detectChineseLanguageInner() {
+    u64 languageCode = 0;
+    SetLanguage language{};
+
+    if (R_SUCCEEDED(appletGetDesiredLanguage(&languageCode)) &&
+        R_SUCCEEDED(setMakeLanguage(languageCode, &language))) {
+        return isChineseLanguage(language);
+    }
+
+    if (R_FAILED(setInitialize())) return false;
+    const bool ok = R_SUCCEEDED(setGetSystemLanguage(&languageCode)) &&
+                    R_SUCCEEDED(setMakeLanguage(languageCode, &language)) &&
+                    isChineseLanguage(language);
+    setExit();
+    return ok;
+}
+
 static bool detectChineseLanguage() {
-    const bool opened = R_SUCCEEDED(setsysInitialize());
-    if (!opened) return false;
-
-    const bool result = detectChineseLanguageInner();
-
-    setsysExit();
-    return result;
+    return detectChineseLanguageInner();
 }
 
 // One interface string in both languages. CH/EN are picked by T() at run time.
