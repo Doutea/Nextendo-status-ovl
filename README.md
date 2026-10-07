@@ -4,13 +4,16 @@ A Nintendo Switch overlay that shows how many players are online on
 [Nextendo Network](https://nextendo.network/status.html), straight from the
 console's home screen — no need to open a browser or put the console down.
 
+<p align="center">
+  <b>当前在线 47</b> · 游戏列表 · 15 秒自动刷新 · 按 A 手动刷新
+</p>
 
 ## What it does
 
 - **Total players online**, taken from the same API the website's status page uses.
 - **A per-game breakdown**, busiest first, with the names shown in Chinese.
 - **Refreshes itself** every 15 seconds while open, and immediately when you
-  select **在线人数** and press **A**.
+  select **当前在线** and press **A**.
 - **Opens instantly.** The panel is drawn before any network request runs, so it
   appears at once and fills in the numbers a moment later.
 - **Never shows you a timeout.** A failed refresh keeps the numbers already on
@@ -33,7 +36,7 @@ console's home screen — no need to open a browser or put the console down.
 
 | Button | Action |
 |--------|--------|
-| `A` | On **在线人数**: refresh now |
+| `A` | On **当前在线**: refresh now |
 | `B` | Close the overlay |
 | `D-Pad` / `Stick` | Move the selection |
 
@@ -46,7 +49,7 @@ Nextendo 网络
 当前在线           47     <- select and press A to refresh
 ─────────────────────────
 游戏 (12)                 <- number of titles currently being played
-  任天堂全明星大乱斗           30
+  任天堂全明星大乱斗 特别版      30
   马力欧赛车 8 豪华版          19
   超级马力欧制造 2             5
   我的世界：地牢 II            4
