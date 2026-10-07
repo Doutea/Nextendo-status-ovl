@@ -99,6 +99,8 @@ Changes made here:
 | 1.0.3 | The refresh row and the count row were merged into one. The redundant duplicate heading was removed. |
 | 1.0.4 | Chinese labels throughout. Footer hints translated. Failed refreshes retry, and keep the previous numbers instead of reporting a timeout. |
 | 1.0.5 | The panel is laid out as a **当前状态** heading with **在线人数** and **游戏数量** rows under it, followed by a **游戏列表** section. Fixed the update time: it was derived from the power-on tick and so had no relation to the console clock; it is now the console's local time at the moment of the fetch. |
+| 1.0.6 | Title changed to **Nextendo 在线状态**. |
+| 1.0.7 | **Follows the console's system language.** Chinese labels and Chinese game names on a Chinese console; English labels and the API's own game names everywhere else. A non-Chinese console has no Chinese font loaded, so Chinese labels there would have been unreadable or missing. |
 
 ## Licence
 
