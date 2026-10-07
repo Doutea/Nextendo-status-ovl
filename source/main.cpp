@@ -188,6 +188,7 @@ static std::map<std::string, int> g_counts;
 static std::vector<JeuEntry> g_jeux;
 static std::string g_lastError;
 static std::atomic<bool> g_dirty{false};
+static std::atomic<u64> g_lastSuccessTick{0};
 static std::atomic<bool> g_overlayVisible{false};
 static std::atomic<bool> g_threadRunning{false};
 
@@ -740,7 +741,6 @@ void loadGamesConfig() {
 // Set by the refresh row's listener to request an immediate fetch.
 // u64 tick of the last successful fetch, so a later failure can
 // report when the numbers on screen are actually from.
-static std::atomic<u64> g_lastSuccessTick{0};
 static std::atomic<bool> g_refreshRequested{false};
 // True while a fetch started by the user is in flight, so the row can show it.
 static std::atomic<bool> g_refreshing{false};
