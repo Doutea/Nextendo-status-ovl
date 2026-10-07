@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <algorithm>
+#include <cstdlib>
 
 // ---------------------------------------------------------------------------
 // Language handling
@@ -239,6 +240,152 @@ static std::string g_cachedIp;
 //
 // The URL, SNI and certificate checks all still use the hostname, so pinning the
 // address changes nothing about TLS.
+// ---------------------------------------------------------------------------
+// Last-good-result cache
+//
+// Measured on the console (timing.log): a single successful request takes
+// 8-20s, and about half of them time out. Waiting for one before showing
+// anything therefore means a blank panel for a long time, so the last result is
+// written to the SD card and read back during initialisation. The panel then
+// opens with numbers already on it and the background refresh updates them.
+//
+// The same raw file API as timingLog() is used, because fopen() fails in an
+// overlay process.
+// ---------------------------------------------------------------------------
+
+static const char* kCountsCachePath = "/switch/nextendo-status/last_counts.txt";
+
+// Escapes the characters that would break the tiny line-based format.
+static std::string cacheEscape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '\t': out += "\\t"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+static std::string cacheUnescape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size()) {
+            const char next = text[++i];
+            switch (next) {
+                case 't': out += '\t'; break;
+                case 'n': out += '\n'; break;
+                case 'r': out += '\r'; break;
+                default: out += next; break;
+            }
+        } else {
+            out += text[i];
+        }
+    }
+    return out;
+}
+
+// Written after every successful fetch. Line format:
+//
+//   fetched=<seconds since boot>
+//   <players>\t<escaped game name>
+static void saveCountsCache(const std::vector<JeuEntry>& jeux, u64 successTick) {
+    std::string text;
+    text += "fetched=" + std::to_string(armTicksToNs(successTick) / 1000000000ULL) + "\n";
+    for (const auto& entry : jeux) {
+        text += std::to_string(entry.players) + "\t" + cacheEscape(entry.name) + "\n";
+    }
+
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    // Remove any previous file so a shorter list cannot leave stale rows behind.
+    fsFsDeleteFile(&fs, kCountsCachePath);
+    if (R_SUCCEEDED(fsFsCreateFile(&fs, kCountsCachePath, text.size(), 0))) {
+        FsFile file{};
+        if (R_SUCCEEDED(fsFsOpenFile(&fs, kCountsCachePath, FsOpenMode_Write, &file))) {
+            fsFileWrite(&file, 0, text.data(), text.size(), FsWriteOption_Flush);
+            fsFileClose(&file);
+        }
+    }
+    fsFsClose(&fs);
+}
+
+// Read during initialisation, before the panel is built.
+static void loadCountsCache() {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    FsFile file{};
+    if (R_FAILED(fsFsOpenFile(&fs, kCountsCachePath, FsOpenMode_Read, &file))) {
+        fsFsClose(&fs);
+        return;
+    }
+
+    s64 size = 0;
+    fsFileGetSize(&file, &size);
+    if (size <= 0 || size > 256 * 1024) {
+        fsFileClose(&file);
+        fsFsClose(&fs);
+        return;
+    }
+
+    std::string content(static_cast<size_t>(size), '\0');
+    u64 bytesRead = 0;
+    const Result readResult = fsFileRead(&file, 0, content.data(), content.size(),
+                                         FsReadOption_None, &bytesRead);
+    fsFileClose(&file);
+    fsFsClose(&fs);
+    if (R_FAILED(readResult)) return;
+    content.resize(static_cast<size_t>(bytesRead));
+
+    std::vector<JeuEntry> jeux;
+    u64 fetchedSeconds = 0;
+
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        const size_t eol = content.find('\n', pos);
+        const std::string line =
+            content.substr(pos, (eol == std::string::npos ? content.size() : eol) - pos);
+        pos = (eol == std::string::npos) ? content.size() + 1 : eol + 1;
+        if (line.empty()) continue;
+
+        if (line.compare(0, 8, "fetched=") == 0) {
+            fetchedSeconds = strtoull(line.c_str() + 8, nullptr, 10);
+            continue;
+        }
+
+        const size_t tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        JeuEntry entry;
+        entry.players = static_cast<int>(strtol(line.c_str(), nullptr, 10));
+        entry.name = cacheUnescape(line.substr(tab + 1));
+        if (!entry.name.empty()) jeux.push_back(std::move(entry));
+    }
+
+    if (jeux.empty()) return;
+
+    mutexLock(&g_mutex);
+    g_jeux = std::move(jeux);
+    g_lastError.clear();
+    mutexUnlock(&g_mutex);
+
+    // Rebuild a tick for the stored moment so the panel can show when the data
+    // is from. The API only needs seconds, so this is accurate enough for a
+    // label.
+    const u64 nowTick = armGetSystemTick();
+    const u64 uptimeSeconds = armTicksToNs(nowTick) / 1000000000ULL;
+    if (fetchedSeconds > 0 && fetchedSeconds <= uptimeSeconds) {
+        const u64 ageSeconds = uptimeSeconds - fetchedSeconds;
+        g_lastSuccessTick = nowTick - (ageSeconds * 19200000ULL);
+    }
+}
+
 // Timing log for the polling path.
 //
 // Appends lines to sdmc:/switch/nextendo-status/timing.log so the fetch path can
@@ -633,7 +780,11 @@ static void pollThreadFunc(void*) {
             auto newCounts = parseOnlineCounts(raw);
             auto newJeux = parseJeux(raw);
 
-            if (!newJeux.empty()) g_lastSuccessTick = armGetSystemTick();
+            if (!newJeux.empty()) {
+                g_lastSuccessTick = armGetSystemTick();
+                // Persist immediately so the next open has something to show.
+                saveCountsCache(newJeux, g_lastSuccessTick.load());
+            }
 
             {
                 char detail[200];
@@ -1121,6 +1272,10 @@ public:
         curl_global_init(CURL_GLOBAL_DEFAULT);
         // Decide the interface language before anything is drawn.
         nextendoUseChinese(detectChineseLanguage());
+
+        // Put the last known numbers on screen straight away. A fetch on this
+        // console can take 8-20s, so without this the panel sits empty.
+        loadCountsCache();
 
         mutexInit(&g_mutex);
 
