@@ -226,11 +226,18 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-// The address that last worked, reused so later requests skip DNS.
-static std::string g_cachedIp;
-
+// Lets curl resolve the hostname itself.
+//
+// An earlier revision pinned the connection to the addresses in
+// NEXTENDO_FALLBACK_IPS via CURLOPT_RESOLVE to avoid a DNS lookup. That was
+// wrong: measured from a PC, connecting to those addresses directly times out
+// (20s, no response) while letting curl resolve the name returns 200 in ~1s. The
+// "optimisation" replaced the only working path with a broken one.
 std::string fetchUrl(const std::string& url, const std::string& host,
-                     const std::vector<std::string>& knownIps, std::string& errorOut) {
+                     const std::vector<std::string>& fallbackIps, std::string& errorOut) {
+    (void)host;
+    (void)fallbackIps;
+
     std::string responseBuffer;
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -241,56 +248,13 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-    // Connect straight to a known address instead of resolving the hostname.
-    //
-    // resolveHostToIp() used to run first on every request, and DNS is the slow
-    // part on this console - it was what made the numbers take seconds to
-    // appear. The host is behind Cloudflare and its addresses are stable, so
-    // they are tried first and DNS is only a last resort.
-    //
-    // CURLOPT_RESOLVE pins the address curl connects to while the URL still
-    // carries the hostname, so SNI and certificate checks are unaffected.
-    struct curl_slist* resolveList = nullptr;
-
-    // The address that worked last time goes first: it is the best candidate.
-    if (!g_cachedIp.empty()) {
-        const std::string entry = host + ":443:" + g_cachedIp;
-        resolveList = curl_slist_append(resolveList, entry.c_str());
-    }
-    for (const auto& ip : knownIps) {
-        if (ip == g_cachedIp) continue;
-        const std::string entry = host + ":443:" + ip;
-        resolveList = curl_slist_append(resolveList, entry.c_str());
-    }
-
-    // Only if nothing is pinned does this fall back to a real lookup.
-    if (resolveList == nullptr) {
-        const std::string ip = resolveHostToIp(host);
-        if (!ip.empty()) {
-            const std::string entry = host + ":443:" + ip;
-            resolveList = curl_slist_append(resolveList, entry.c_str());
-        }
-    }
-
-    if (resolveList) curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
-
     const CURLcode res = curl_easy_perform(curl);
-
-    if (res == CURLE_OK) {
-        // Remember which address served this, so the next request starts there.
-        char* usedIp = nullptr;
-        if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
-            g_cachedIp = usedIp;
-        }
-    }
-
-    if (resolveList) curl_slist_free_all(resolveList);
 
     if (res != CURLE_OK) {
         errorOut = curl_easy_strerror(res);
