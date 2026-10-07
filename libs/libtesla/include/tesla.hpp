@@ -139,7 +139,7 @@ namespace tsl {
             constexpr Color ColorClickAnimation   = { 0x0, 0x2, 0x2, 0xF };   ///< Element click animation color
     // Light blue, for numeric values. Not part of upstream libtesla; added
     // here because the stock value colours are green and grey.
-    constexpr Color ColorValueBlue        = { 0x6, 0xC, 0xF, 0xF };
+    constexpr Color ColorValueBlue        = { 0x0, 0xA, 0xF, 0xF };
         }
     }
 
@@ -2193,12 +2193,12 @@ namespace tsl {
                     renderer->drawString(this->m_text.c_str(), false, this->getX() + 20, this->getY() + 45, 23, a(tsl::style::color::ColorText));
                 }
 
-                const tsl::style::color::Color valueColor =
+                const tsl::Color valueColor =
                             this->m_valueColorSet
                                 ? this->m_valueColor
                                 : (this->m_faint ? tsl::style::color::ColorDescription
                                                  : tsl::style::color::ColorHighlight);
-                    renderer->drawString(this->m_value.c_str(), false, this->getX() + this->m_maxWidth + 45, this->getY() + 45, 20, a(valueColor));
+                    renderer->drawString(this->m_value.c_str(), false, this->getX() + this->m_maxWidth + 45, this->getY() + 45, 20, valueColor);
             }
 
             virtual void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
@@ -2267,7 +2267,7 @@ namespace tsl {
             /**
              * @brief Sets the colour of the value text explicitly
              */
-            inline void setValueColor(tsl::style::color::Color color) {
+            inline void setValueColor(tsl::Color color) {
                 this->m_valueColor = color;
                 this->m_valueColorSet = true;
             }
@@ -2306,7 +2306,7 @@ namespace tsl {
             bool m_trunctuated = false;
             bool m_faint = false;
             // Optional explicit colour for the value text; see setValueColor().
-            tsl::style::color::Color m_valueColor{};
+            tsl::Color m_valueColor{};
             bool m_valueColorSet = false;
 
             bool m_touched = false;
