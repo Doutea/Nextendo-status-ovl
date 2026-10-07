@@ -38,8 +38,8 @@ bool nextendoIsChinese() {
     return g_useChinese;
 }
 
-// Turns the system language id into "is this a Chinese console?".
-static bool detectChineseLanguage() {
+// Inner half of the check, split out so the service is always closed again.
+static bool detectChineseLanguageInner() {
     u64 languageCode = 0;
     if (R_FAILED(setGetSystemLanguage(&languageCode))) return false;
 
@@ -55,6 +55,22 @@ static bool detectChineseLanguage() {
         default:
             return false;
     }
+}
+
+// Turns the system language id into "is this a Chinese console?".
+//
+// set:sys has to be opened here. libnx's startup uses it briefly to read the
+// firmware version and then closes it again (nx/source/runtime/init.c), so by
+// the time initServices() runs the service is shut and every set* call fails -
+// which silently produced the English fallback on Chinese consoles.
+static bool detectChineseLanguage() {
+    const bool opened = R_SUCCEEDED(setsysInitialize());
+    if (!opened) return false;
+
+    const bool result = detectChineseLanguageInner();
+
+    setsysExit();
+    return result;
 }
 
 // One interface string in both languages. CH/EN are picked by T() at run time.
@@ -690,6 +706,16 @@ static std::string localisedName(const std::string& apiName) {
     auto it = g_gameNamesZh.find(apiName);
     return (it != g_gameNamesZh.end()) ? it->second : apiName;
 }
+// Numeric values are shown in light blue, except zero, which is shown in
+// white so an empty game reads as inactive rather than as a live count.
+static void applyValueColour(tsl::elm::ListItem* item, const std::string& value) {
+    if (item == nullptr) return;
+    item->setValue(value);
+    const bool isZero = (value == "0");
+    item->setValueColor(isZero ? tsl::style::color::ColorText
+                               : tsl::style::color::ColorValueBlue);
+}
+
 class GuiTest : public tsl::Gui {
 public:
     // No I/O here: fetching in the constructor is what made the panel take
@@ -768,7 +794,7 @@ private:
             for (const auto& j : jeux) {
                 auto it = m_rows.find(j.name);
                 if (it != m_rows.end() && it->second != nullptr) {
-                    it->second->setValue(std::to_string(j.players));
+                    applyValueColour(it->second, std::to_string(j.players));
                 }
             }
             m_sectionHeader->setText(T(kGameList));
@@ -802,8 +828,8 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            auto* item = new tsl::elm::ListItem(localisedName(j.name),
-                                                std::to_string(j.players));
+            auto* item = new tsl::elm::ListItem(localisedName(j.name));
+            applyValueColour(item, std::to_string(j.players));
             list->addItem(item);
             m_rows[j.name] = item;
         }
@@ -900,8 +926,8 @@ private:
         m_totalText = std::to_string(total);
         m_gamesText = std::to_string(jeux.size());
         rebuildGameRows(jeux);
-        if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText);
-        if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText);
+        applyValueColour(m_totalItem, m_totalText);
+        applyValueColour(m_gamesItem, m_gamesText);
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
