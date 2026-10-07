@@ -38,7 +38,7 @@ include $(DEVKITPRO)/libnx/switch_rules
 #   NACP building is skipped as well.
 #---------------------------------------------------------------------------------
 APP_TITLE	:=	Nextendo Status
-APP_VERSION := 1.1.5
+APP_VERSION := 1.1.6
 
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
