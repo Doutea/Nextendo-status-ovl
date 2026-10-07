@@ -1,14 +1,10 @@
-# Build output
+# Build artefacts
 build/
-tests/build/
-*.ovl
-*.nro
-*.nacp
 *.elf
+*.nacp
+*.nro
+*.ovl
 *.map
-*.zip
-out/
 
-# Editor
-.vscode/
-*.code-workspace
+# Debug logs written by the overlay at runtime
+*.log
