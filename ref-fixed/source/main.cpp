@@ -150,7 +150,9 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
+    // One attempt's cap. fetchUrl() retries with a growing deadline,
+    // so this is not the effective limit for the whole request.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
@@ -182,6 +184,44 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
 
 std::string fetchOnlineCounts(std::string& errorOut) {
     return fetchUrl("https://nextendo.network/api/online-counts", "nextendo.network", NEXTENDO_FALLBACK_IPS, errorOut);
+}
+
+// Fetches the counts document, retrying with a growing deadline.
+//
+// A first request has to resolve DNS and complete a TLS handshake, and on this
+// console that occasionally ran past a single short timeout - which surfaced in
+// the panel as "Timeout was reached" and then fixed itself on the next poll.
+// Two things remove that:
+//
+//   * the request is retried here rather than waiting 15s for the next poll;
+//   * each attempt gets a progressively longer deadline, because the failed
+//     attempt has usually left the connection warmed up.
+//
+// Startup cost matters, so the total is capped: three attempts at 12s each is
+// the worst case, and only when every attempt fails.
+std::string fetchCountsWithRetry(std::string& errorOut) {
+    static const int kAttempts = 3;
+
+    for (int attempt = 0; attempt < kAttempts; ++attempt) {
+        std::string lastError;
+        const std::string body = fetchOnlineCounts(lastError);
+
+        if (!body.empty() && lastError.empty()) {
+            errorOut.clear();
+            return body;
+        }
+
+        // A transport error, or an empty body. Keep the message from the last
+        // attempt and try again unless this was the final one.
+        errorOut = lastError.empty() ? "empty response" : lastError;
+
+        if (attempt + 1 < kAttempts) {
+            // Brief pause so a transient DNS or TLS hiccup can clear.
+            svcSleepThread(300'000'000LL);  // 300 ms
+        }
+    }
+
+    return std::string();
 }
 
 std::map<std::string, int> parseOnlineCounts(const std::string& rawJson) {
@@ -358,6 +398,9 @@ void loadGamesConfig() {
 
 // --- Hilo de polling ---
 // Set by the refresh row's listener to request an immediate fetch.
+// u64 tick of the last successful fetch, so a later failure can
+// report when the numbers on screen are actually from.
+static std::atomic<u64> g_lastSuccessTick{0};
 static std::atomic<bool> g_refreshRequested{false};
 // True while a fetch started by the user is in flight, so the row can show it.
 static std::atomic<bool> g_refreshing{false};
@@ -375,9 +418,11 @@ static void pollThreadFunc(void*) {
             if (requested) g_refreshing = true;
 
             std::string error;
-            std::string raw = fetchOnlineCounts(error);
+            std::string raw = fetchCountsWithRetry(error);
             auto newCounts = parseOnlineCounts(raw);
             auto newJeux = parseJeux(raw);
+
+            if (!newJeux.empty()) g_lastSuccessTick = armGetSystemTick();
 
             {
                 mutexLock(&g_mutex);
@@ -499,6 +544,56 @@ private:
     bool m_statusMeasured = false;
 };
 
+// Chinese names for the titles the API reports.
+//
+// Most of the API's names are long in English ("Super Smash Bros. Ultimate",
+// "METAL GEAR SOLID: Peace Walker - Master Collection Version") and were being
+// cut off by the row width. Nintendo's own Chinese names are shorter and are
+// what a Chinese-language console shows, so they are used where one exists.
+//
+// Only the display name changes. The count still comes from the API by title id;
+// nothing here is used for matching.
+static const std::map<std::string, std::string> g_gameNamesZh = {
+    {"Super Smash Bros. Ultimate",                    "\u4efb\u5929\u5802\u5168\u660e\u661f\u5927\u4e71\u6597 \u7279\u522b\u7248"},
+    {"Mario Kart 8 Deluxe",                           "\u9a6c\u529b\u6b27\u8d5b\u8f66 8 \u8c6a\u534e\u7248"},
+    {"Super Mario Maker 2",                           "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5236\u9020 2"},
+    {"Minecraft Dungeons II",                         "\u6211\u7684\u4e16\u754c\uff1a\u5730\u7262 II"},
+    {"Crash Team Racing Nitro-Fueled",                "\u53e4\u60d1\u72fc\u8d5b\u8f66\u5b9d\u8d1d\u8f66"},
+    {"Splatoon 3",                                    "\u65af\u666e\u62c9\u901f 3"},
+    {"Pok\u00e9mon Scarlet",                          "\u5b9d\u53ef\u68a6\u6731"},
+    {"L\u00e9gendes Pok\u00e9mon : Z-A",              "\u5b9d\u53ef\u68a6\u4f20\u8bf4 Z-A"},
+    {"Nintendo 64 \u2013 Nintendo Classics",          "Nintendo 64 \u7ecf\u5178\u5408\u96c6"},
+    {"Minecraft: Nintendo Switch Edition",            "\u6211\u7684\u4e16\u754c\uff1aSwitch \u7248"},
+    {"Diablo III: Eternal Collection",                "\u6697\u9ed1\u7834\u574f\u795e III\uff1a\u6c38\u6052\u4e4b\u6218"},
+    {"POKK\u00c9N TOURNAMENT DX",                     "\u5b9d\u53ef\u62f3 DX"},
+    {"SUPER MARIO BROS. 35",                          "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5144\u5f1f 35"},
+    {"PAC-MAN 99",                                    "\u5403\u8c46\u4eba 99"},
+    {"Mario Tennis Aces",                             "\u9a6c\u529b\u6b27\u7f51\u7403 \u8d85\u7ea7\u6263\u6740"},
+    {"Overcooked! 2",                                 "\u80e1\u95f9\u53a8\u623f 2"},
+    {"Super Mario Odyssey",                           "\u8d85\u7ea7\u9a6c\u529b\u6b27 \u5965\u5fb7\u8d5b"},
+    {"TETRIS 99",                                     "\u4fc4\u7f57\u65af\u65b9\u5757 99"},
+    {"Super Mario Bros. Wonder",                      "\u8d85\u7ea7\u9a6c\u529b\u6b27\u5144\u5f1f \u60ca\u5947"},
+    {"Saints Row: The Third - The Full Package",      "\u9ed1\u9053\u5723\u5f92 3\uff1a\u5b8c\u6574\u7248"},
+    {"Splatoon 2",                                    "\u65af\u666e\u62c9\u901f 2"},
+    {"Just Shapes & Beats",                           "\u5f62\u72b6\u4e0e\u97f3\u7b26"},
+    {"Luigi's Mansion 3",                             "\u8def\u6613\u5409\u9b3c\u5c4b 3"},
+    {"Clubhouse Games: 51 Worldwide Classics",        "\u4e16\u754c\u6e38\u620f\u5927\u5168 51"},
+    {"ARMS",                                          "ARMS"},
+    {"Animal Crossing: New Horizons",                 "\u52a8\u7269\u68ee\u53cb\u4f1a \u65b0\u5730\u5e73"},
+    {"Mario Party Superstars",                        "\u9a6c\u529b\u6b27\u6d3e\u5bf9 \u8d85\u7ea7\u661f\u661f"},
+    {"Mario Strikers: Battle League",                 "\u9a6c\u529b\u6b27\u8db3\u7403\uff1a\u8d85\u7ea7\u5dde\u9645\u8054\u8d5b"},
+    {"Mario Golf: Super Rush",                        "\u9a6c\u529b\u6b27\u9ad8\u5c14\u592b\uff1a\u8d85\u7ea7\u51b2\u523a"},
+    {"METAL GEAR SOLID: Peace Walker - Master Collection Version", "\u4e2d\u91d1\u88c5\u5907\u5e73\u884c\u8005\uff1a\u5927\u5e08\u5408\u96c6\u7248"},
+    {"MONSTER HUNTER GENERATIONS ULTIMATE",           "\u602a\u7269\u730e\u4eba XX"},
+    {"Pok\u00e9mon Violet",                           "\u5b9d\u53ef\u68a6\u7d2b"},
+};
+
+// Falls back to the API's own name when no Chinese one is known, so a newly
+// added title still shows up instead of disappearing.
+static std::string localisedName(const std::string& apiName) {
+    auto it = g_gameNamesZh.find(apiName);
+    return (it != g_gameNamesZh.end()) ? it->second : apiName;
+}
 class GuiTest : public tsl::Gui {
 public:
     // No I/O here: fetching in the constructor is what made the panel take
@@ -510,10 +605,11 @@ public:
                                              "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
         auto* list = new tsl::elm::List();
 
-        // One row for the count, which is also the refresh control: selecting it
-        // and pressing A asks the polling thread for an immediate fetch. An
-        // earlier revision had a separate "refresh status" row, which duplicated
-        // this one.
+        // The count row is also the refresh control: selecting it and pressing A
+        // asks the polling thread for an immediate fetch.
+        //
+        // No CategoryHeader above it on purpose - one would draw a full-width
+        // rule, which with a single row read as a stray line across the panel.
         //
         // A click listener must always be set, because Element::onClick() calls
         // it unconditionally and an empty std::function would abort.
@@ -602,7 +698,8 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            auto* item = new tsl::elm::ListItem(j.name, std::to_string(j.players));
+            auto* item = new tsl::elm::ListItem(localisedName(j.name),
+                                                std::to_string(j.players));
             list->addItem(item);
             m_rows[j.name] = item;
         }
@@ -613,6 +710,19 @@ private:
         m_shownNames = names;
     }
 
+    // "HH:MM:SS" for a u64 system tick, used to say when the numbers were taken.
+    static std::string clockFromTick(u64 tick) {
+        const u64 ns = armTicksToNs(tick);
+        TimeCalendarTime caltime;
+        TimeCalendarAdditionalInfo addinfo;
+        timeToCalendarTimeWithMyRule(
+            static_cast<u64>(ns / 1000000000ULL), &caltime, &addinfo);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+                 caltime.hour, caltime.minute, caltime.second);
+        return buf;
+    }
+
     void refreshUI() {
         mutexLock(&g_mutex);
         const std::string errCopy = g_lastError;
@@ -620,17 +730,18 @@ private:
         std::vector<JeuEntry> jeux = g_jeux;
         mutexUnlock(&g_mutex);
 
-        // Subtitle: when the numbers were last updated.
-        u64 timestamp;
-        timeGetCurrentTime(TimeType_LocalSystemClock, &timestamp);
-        TimeCalendarTime caltime;
-        TimeCalendarAdditionalInfo addinfo;
-        timeToCalendarTimeWithMyRule(timestamp, &caltime, &addinfo);
-        char timeBuf[40];
-        snprintf(timeBuf, sizeof(timeBuf),
-                 "\u66f4\u65b0\u4e8e %02d:%02d:%02d",                          // 更新于 HH:MM:SS
-                 caltime.hour, caltime.minute, caltime.second);
-        m_frame->setSubtitle(timeBuf);
+        const u64 lastTick = g_lastSuccessTick.load();
+        const bool refreshing = g_refreshing.load();
+
+        // Subtitle: the time of the last successful fetch, which is what the
+        // numbers correspond to.
+        if (lastTick != 0) {
+            const std::string t = clockFromTick(lastTick);
+            const std::string line = "\u66f4\u65b0\u4e8e " + t;                 // 更新于
+            m_frame->setSubtitle(line.c_str());
+        } else {
+            m_frame->setSubtitle("\u52a0\u8f7d\u4e2d\u2026");                  // 加载中…
+        }
 
         // The total is sum(jeux[].joueurs), which is the figure the website
         // shows. It is deliberately not sum(counts): a title present in several
@@ -640,11 +751,12 @@ private:
         for (const auto& j : jeux) total += j.players;
 
         if (!haveData) {
-            // Nothing has arrived yet, or the last attempt failed.
-            if (g_refreshing.load()) {
-                m_totalText = "\u5237\u65b0\u4e2d\u2026";                     // 刷新中…
+            // Nothing has arrived yet. A raw error string is only worth showing
+            // here, because there is nothing on screen to fall back on.
+            if (refreshing || lastTick == 0) {
+                m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                      // 加载中…
             } else if (errCopy.empty()) {
-                m_totalText = "\u7b49\u5f85\u6570\u636e\u2026";               // 等待数据…
+                m_totalText = "\u7b49\u5f85\u6570\u636e\u2026";                // 等待数据…
             } else {
                 m_totalText = errCopy;
             }
@@ -659,8 +771,10 @@ private:
             return a.name < b.name;
         });
 
-        // With data in hand the row shows the number itself. A refresh in flight
-        // only changes the subtitle, so the count stays readable.
+        // The row shows the number itself. A refresh in flight, or a failed one,
+        // never replaces it: the subtitle already says when these numbers were
+        // taken, so a transient timeout leaves the panel readable instead of
+        // printing an error over the count.
         m_totalText = std::to_string(total);
         rebuildGameRows(jeux);
         if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText);
