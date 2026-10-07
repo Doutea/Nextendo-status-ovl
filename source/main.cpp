@@ -93,6 +93,7 @@ static const UiText kSectionNow  = {"\u5f53\u524d\u72b6\u6001", "Current status"
 static const UiText kPlayers     = {"\u5728\u7ebf\u4eba\u6570", "Players online"};
 static const UiText kGameCount   = {"\u6e38\u620f\u6570\u91cf", "Games played"};
 static const UiText kGameList    = {"\u6e38\u620f\u5217\u8868", "Game list"};
+static const UiText kRefreshing  = {"\u5237\u65b0\u4e2d\u2026", "Refreshing\u2026"};
 static const UiText kWaiting     = {"\u7b49\u5f85\u6570\u636e\u2026", "Waiting for data\u2026"};
 static const UiText kUpdatedAt   = {"\u66f4\u65b0\u4e8e ", "Updated "};
 
@@ -527,6 +528,13 @@ static std::atomic<u64> g_lastSuccessTick{0};
 static std::atomic<bool> g_refreshRequested{false};
 // True while a fetch started by the user is in flight, so the row can show it.
 static std::atomic<bool> g_refreshing{false};
+// Set the moment A is pressed and cleared when the fetch finishes.
+//
+// It exists so the row can react to the key press immediately: the polling
+// thread only notices g_refreshRequested when its 1s step comes round, and for
+// that second nothing would otherwise change on screen, which makes the press
+// look ignored.
+static std::atomic<bool> g_manualRefresh{false};
 
 static void pollThreadFunc(void*) {
     // No game-config download here any more. It fed the per-title detail view,
@@ -559,6 +567,7 @@ static void pollThreadFunc(void*) {
             }
 
             g_refreshing = false;
+            g_manualRefresh = false;
             g_dirty = true;
         }
 
@@ -785,6 +794,9 @@ public:
         m_totalItem->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
+                // Raised here rather than in the thread: this runs on the frame
+                // the button was pressed, so the row reacts at once.
+                g_manualRefresh = true;
                 return true;
             }
             return false;
@@ -809,7 +821,20 @@ public:
     }
 
     virtual void update() override {
-        if (g_dirty.exchange(false)) {
+        const bool dirty = g_dirty.exchange(false);
+        const bool manual = g_manualRefresh.load();
+        const bool active = g_refreshing.load();
+
+        // Redraw when the "refreshing" state changes as well as when new data
+        // arrives. g_dirty alone is not enough: it is only raised once a fetch
+        // has finished, so the press itself would show nothing.
+        static bool lastManual = false;
+        static bool lastActive = false;
+        const bool stateChanged = (manual != lastManual) || (active != lastActive);
+        lastManual = manual;
+        lastActive = active;
+
+        if (dirty || stateChanged) {
             refreshUI();
         }
     }
@@ -854,6 +879,9 @@ private:
         total->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
+                // Raised here rather than in the thread: this runs on the frame
+                // the button was pressed, so the row reacts at once.
+                g_manualRefresh = true;
                 return true;
             }
             return false;
@@ -926,6 +954,10 @@ private:
 
         const u64 lastTick = g_lastSuccessTick.load();
         const bool refreshing = g_refreshing.load();
+        // Set by the A handler and cleared when the fetch finishes, so the row
+        // responds on the frame the button was pressed rather than up to a
+        // second later when the polling thread picks the request up.
+        const bool manualRefresh = g_manualRefresh.load();
 
         // Subtitle: the console clock time at which these numbers were fetched.
         if (lastTick != 0) {
@@ -963,13 +995,23 @@ private:
             return a.name < b.name;
         });
 
-        // These rows show the numbers themselves. A refresh in flight, or a
-        // failed one, never replaces them: the subtitle already says when they
-        // were taken, so a transient timeout leaves the panel readable.
+        // The rows keep their last good numbers through an automatic poll, and a
+        // failed fetch never blanks them - a transient error leaves the panel
+        // readable rather than replacing the counts with a warning.
+        //
+        // A refresh the user asked for is the exception: the count row shows
+        // that the press was registered, then goes back to the number.
         m_totalText = std::to_string(total);
         m_gamesText = std::to_string(jeux.size());
         rebuildGameRows(jeux);
-        applyValueColour(m_totalItem, m_totalText);
+
+        if (manualRefresh && m_totalItem != nullptr) {
+            // Faint, because it is a status rather than a value. The number is
+            // restored as soon as the flag clears.
+            m_totalItem->setValue(T(kRefreshing), true);
+        } else {
+            applyValueColour(m_totalItem, m_totalText);
+        }
         applyValueColour(m_gamesItem, m_gamesText);
     }
 
