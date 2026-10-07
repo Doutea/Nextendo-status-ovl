@@ -103,6 +103,7 @@ Changes made here:
 | 1.0.7 | **Follows the console's system language.** Chinese labels and Chinese game names on a Chinese console; English labels and the API's own game names everywhere else. A non-Chinese console has no Chinese font loaded, so Chinese labels there would have been unreadable or missing. |
 | 1.0.8 | The language check now opens `set:sys` before reading the system language. libnx closes that service during startup, so the check had been failing and falling back to English on Chinese consoles. Numeric values are drawn in `#00AAFF`, or white when the value is zero. |
 | 1.0.9 | The language check now uses `appletGetDesiredLanguage()`, falling back to `set:`. It had been opening `set:sys`, but `setGetSystemLanguage()` talks to the `set:` service, so the call failed and the interface stayed English on Chinese consoles. Numeric values are `#00DDFF`, or white when zero. |
+| 1.1.0 | Requests connect straight to a known address instead of resolving the hostname first, and the address that worked is reused, so the counts no longer wait on DNS. The unused `games.json` fetch was dropped, and the retry loop now abandons its remaining attempts as soon as the overlay closes. |
 
 ## Licence
 
