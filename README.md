@@ -25,8 +25,9 @@
 
 ## 界面
 
-![Uploading abb430c66507b8d16ac598a9b4c1bea7.jpg…]()
-![Uploading abb430c66507b8d16ac598a9b4c1bea7_720.jpg…]()
+<p align="center">
+  <img src="assets/screenshot-zh.jpg" width="620">
+</p>
 
 
 ## 按键
@@ -89,6 +90,12 @@ leaving your game.
 - **Manual refresh** by selecting **Players online** and pressing **A**
 - **Opens instantly** — the last known numbers are cached, so there is no wait
 - **Chinese and English interface**, chosen from the console's system language
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshot-en.jpg" width="620">
+</p>
 
 ## Controls
 
