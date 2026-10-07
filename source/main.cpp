@@ -34,7 +34,8 @@ void nextendoUseChinese(bool chinese) {
     g_useChinese = chinese;
 }
 
-bool nextendoIsChinese() {
+// extern "C" so this overrides the weak fallback declared in tesla.hpp.
+extern "C" bool nextendoIsChinese() {
     return g_useChinese;
 }
 
