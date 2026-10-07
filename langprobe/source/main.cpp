@@ -84,16 +84,11 @@ std::vector<Row> probe() {
         setExit();
     }
 
-    // 3. set:sys, opened here as a second opinion.
+    // 3. set:sys. It has no language getter at all, which is why using it for the
+    //    check was wrong; this just confirms the service opens.
     const Result sysRc = setsysInitialize();
     rows.push_back({"setsysInitialize", hex(sysRc)});
-    if (R_SUCCEEDED(sysRc)) {
-        SetLanguage language{};
-        const Result rc = setsysGetSystemLanguage(&language);
-        rows.push_back({"setsysGetSystemLanguage", hex(rc)});
-        if (R_SUCCEEDED(rc)) rows.push_back({"  language", langName(language)});
-        setsysExit();
-    }
+    if (R_SUCCEEDED(sysRc)) setsysExit();
 
     return rows;
 }
