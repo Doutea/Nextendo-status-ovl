@@ -605,16 +605,18 @@ public:
                                              "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
         auto* list = new tsl::elm::List();
 
-        // The count row is also the refresh control: selecting it and pressing A
-        // asks the polling thread for an immediate fetch.
-        //
-        // No CategoryHeader above it on purpose - one would draw a full-width
-        // rule, which with a single row read as a stray line across the panel.
+        // Section heading. The rule it draws is the divider above the panel's
+        // content, which is wanted here.
+        list->addItem(new tsl::elm::CategoryHeader(
+            "\u5f53\u524d\u72b6\u6001"));                                    // 当前状态
+
+        // Players online. Selectable, and pressing A refreshes: this is the row
+        // a user reaches for when the numbers look stale.
         //
         // A click listener must always be set, because Element::onClick() calls
         // it unconditionally and an empty std::function would abort.
         m_totalItem = new tsl::elm::ListItem(
-            "\u5f53\u524d\u5728\u7ebf",                                       // 当前在线
+            "\u5728\u7ebf\u4eba\u6570",                                       // 在线人数
             m_totalText);
         m_totalItem->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
@@ -625,7 +627,15 @@ public:
         });
         list->addItem(m_totalItem);
 
-        m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");      // 游戏
+        // How many titles are currently being played.
+        m_gamesItem = new tsl::elm::ListItem(
+            "\u6e38\u620f\u6570\u91cf",                                       // 游戏数量
+            m_gamesText);
+        list->addItem(m_gamesItem);
+
+        // The list itself. This heading is also what separates the two blocks.
+        m_sectionHeader = new tsl::elm::CategoryHeader(
+            "\u6e38\u620f\u5217\u8868");                                     // 游戏列表
         list->addItem(m_sectionHeader);
 
         m_placeholder = new tsl::elm::ListItem(
@@ -651,7 +661,7 @@ public:
     }
 
 private:
-    // Rebuilds the game rows when the set of games changes.
+    // Rebuilds the entry rows when the set of games changes.
     //
     // The list is reconstructed rather than edited, because rows are added and
     // removed and tsl::elm::List offers no removal API. removeFocus() comes
@@ -670,8 +680,7 @@ private:
                     it->second->setValue(std::to_string(j.players));
                 }
             }
-            m_sectionHeader->setText(
-                std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
+            m_sectionHeader->setText("\u6e38\u620f\u5217\u8868");            // 游戏列表
             return;
         }
 
@@ -679,7 +688,9 @@ private:
 
         auto* list = new tsl::elm::List();
 
-        auto* total = new tsl::elm::ListItem("\u5f53\u524d\u5728\u7ebf",     // 当前在线
+        list->addItem(new tsl::elm::CategoryHeader("\u5f53\u524d\u72b6\u6001"));  // 当前状态
+
+        auto* total = new tsl::elm::ListItem("\u5728\u7ebf\u4eba\u6570",     // 在线人数
                                              m_totalText);
         total->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
@@ -691,8 +702,12 @@ private:
         list->addItem(total);
         m_totalItem = total;
 
-        auto* section = new tsl::elm::CategoryHeader(
-            std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
+        auto* games = new tsl::elm::ListItem("\u6e38\u620f\u6570\u91cf",     // 游戏数量
+                                             m_gamesText);
+        list->addItem(games);
+        m_gamesItem = games;
+
+        auto* section = new tsl::elm::CategoryHeader("\u6e38\u620f\u5217\u8868");  // 游戏列表
         list->addItem(section);
         m_sectionHeader = section;
 
@@ -710,13 +725,34 @@ private:
         m_shownNames = names;
     }
 
-    // "HH:MM:SS" for a u64 system tick, used to say when the numbers were taken.
-    static std::string clockFromTick(u64 tick) {
-        const u64 ns = armTicksToNs(tick);
+    // "HH:MM:SS" for the moment a fetch completed.
+    //
+    // The tick from armGetSystemTick() counts from power-on, so it is NOT a Unix
+    // timestamp and must not be handed to the time service directly - doing that
+    // produced a time unrelated to the console's clock. What is needed is the
+    // current wall-clock time minus however long ago the fetch happened.
+    static std::string fetchClock(u64 successTick) {
+        const u64 now_tick = armGetSystemTick();
+        // Guard against a tick that appears to be in the future after a wrap.
+        const u64 elapsed_ns = (now_tick > successTick)
+                                   ? armTicksToNs(now_tick - successTick)
+                                   : 0;
+
+        u64 now_seconds = 0;
+        if (R_FAILED(timeGetCurrentTime(TimeType_LocalSystemClock, &now_seconds))) {
+            return "--:--:--";
+        }
+
+        const u64 then_seconds = (elapsed_ns / 1000000000ULL > now_seconds)
+                                     ? 0
+                                     : now_seconds - (elapsed_ns / 1000000000ULL);
+
         TimeCalendarTime caltime;
         TimeCalendarAdditionalInfo addinfo;
-        timeToCalendarTimeWithMyRule(
-            static_cast<u64>(ns / 1000000000ULL), &caltime, &addinfo);
+        if (R_FAILED(timeToCalendarTimeWithMyRule(then_seconds, &caltime, &addinfo))) {
+            return "--:--:--";
+        }
+
         char buf[16];
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
                  caltime.hour, caltime.minute, caltime.second);
@@ -733,14 +769,26 @@ private:
         const u64 lastTick = g_lastSuccessTick.load();
         const bool refreshing = g_refreshing.load();
 
-        // Subtitle: the time of the last successful fetch, which is what the
-        // numbers correspond to.
+        // Subtitle: the console clock time at which these numbers were fetched.
         if (lastTick != 0) {
-            const std::string t = clockFromTick(lastTick);
-            const std::string line = "\u66f4\u65b0\u4e8e " + t;                 // 更新于
+            const std::string line =
+                "\u66f4\u65b0\u4e8e " + fetchClock(lastTick);                // 更新于
             m_frame->setSubtitle(line.c_str());
         } else {
-            m_frame->setSubtitle("\u52a0\u8f7d\u4e2d\u2026");                  // 加载中…
+            m_frame->setSubtitle(refreshing ? "\u52a0\u8f7d\u4e2d\u2026"     // 加载中…
+                                            : "\u7b49\u5f85\u6570\u636e\u2026");  // 等待数据…
+        }
+
+        if (!haveData) {
+            m_totalText = refreshing ? "\u52a0\u8f7d\u4e2d\u2026"            // 加载中…
+                                     : (errCopy.empty()
+                                            ? std::string("\u7b49\u5f85\u6570\u636e\u2026")  // 等待数据…
+                                            : errCopy);
+            m_gamesText = "--";
+            if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
+            if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText, true);
+            if (m_placeholder != nullptr) m_placeholder->setValue(m_totalText, true);
+            return;
         }
 
         // The total is sum(jeux[].joueurs), which is the figure the website
@@ -750,43 +798,31 @@ private:
         int total = 0;
         for (const auto& j : jeux) total += j.players;
 
-        if (!haveData) {
-            // Nothing has arrived yet. A raw error string is only worth showing
-            // here, because there is nothing on screen to fall back on.
-            if (refreshing || lastTick == 0) {
-                m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                      // 加载中…
-            } else if (errCopy.empty()) {
-                m_totalText = "\u7b49\u5f85\u6570\u636e\u2026";                // 等待数据…
-            } else {
-                m_totalText = errCopy;
-            }
-            if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
-            if (m_placeholder != nullptr) m_placeholder->setValue(m_totalText, true);
-            return;
-        }
-
         // Busiest first.
         std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
             if (a.players != b.players) return a.players > b.players;
             return a.name < b.name;
         });
 
-        // The row shows the number itself. A refresh in flight, or a failed one,
-        // never replaces it: the subtitle already says when these numbers were
-        // taken, so a transient timeout leaves the panel readable instead of
-        // printing an error over the count.
+        // These rows show the numbers themselves. A refresh in flight, or a
+        // failed one, never replaces them: the subtitle already says when they
+        // were taken, so a transient timeout leaves the panel readable.
         m_totalText = std::to_string(total);
+        m_gamesText = std::to_string(jeux.size());
         rebuildGameRows(jeux);
         if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText);
+        if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText);
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
     tsl::elm::List* m_list = nullptr;
     tsl::elm::ListItem* m_totalItem = nullptr;
+    tsl::elm::ListItem* m_gamesItem = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     tsl::elm::ListItem* m_placeholder = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
     std::string m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
+    std::string m_gamesText = "--";
     std::vector<std::string> m_shownNames;
 };
 class OverlayTest : public tsl::Overlay {
