@@ -226,7 +226,11 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-std::string fetchUrl(const std::string& url, const std::string& host, const std::vector<std::string>& fallbackIps, std::string& errorOut) {
+// The address that last worked, reused so later requests skip DNS.
+static std::string g_cachedIp;
+
+std::string fetchUrl(const std::string& url, const std::string& host,
+                     const std::vector<std::string>& knownIps, std::string& errorOut) {
     std::string responseBuffer;
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -237,26 +241,55 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    // One attempt's cap. fetchUrl() retries with a growing deadline,
-    // so this is not the effective limit for the whole request.
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
-    std::string ip = resolveHostToIp(host);
+    // Connect straight to a known address instead of resolving the hostname.
+    //
+    // resolveHostToIp() used to run first on every request, and DNS is the slow
+    // part on this console - it was what made the numbers take seconds to
+    // appear. The host is behind Cloudflare and its addresses are stable, so
+    // they are tried first and DNS is only a last resort.
+    //
+    // CURLOPT_RESOLVE pins the address curl connects to while the URL still
+    // carries the hostname, so SNI and certificate checks are unaffected.
     struct curl_slist* resolveList = nullptr;
-    if (!ip.empty()) {
-        std::string entry = host + ":443:" + ip;
-        resolveList = curl_slist_append(nullptr, entry.c_str());
-    } else {
-        for (const auto& fallbackIp : fallbackIps) {
-            std::string entry = host + ":443:" + fallbackIp;
+
+    // The address that worked last time goes first: it is the best candidate.
+    if (!g_cachedIp.empty()) {
+        const std::string entry = host + ":443:" + g_cachedIp;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+    for (const auto& ip : knownIps) {
+        if (ip == g_cachedIp) continue;
+        const std::string entry = host + ":443:" + ip;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+
+    // Only if nothing is pinned does this fall back to a real lookup.
+    if (resolveList == nullptr) {
+        const std::string ip = resolveHostToIp(host);
+        if (!ip.empty()) {
+            const std::string entry = host + ":443:" + ip;
             resolveList = curl_slist_append(resolveList, entry.c_str());
         }
     }
+
     if (resolveList) curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
 
-    CURLcode res = curl_easy_perform(curl);
+    const CURLcode res = curl_easy_perform(curl);
+
+    if (res == CURLE_OK) {
+        // Remember which address served this, so the next request starts there.
+        char* usedIp = nullptr;
+        if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
+            g_cachedIp = usedIp;
+        }
+    }
+
     if (resolveList) curl_slist_free_all(resolveList);
 
     if (res != CURLE_OK) {
@@ -273,19 +306,12 @@ std::string fetchOnlineCounts(std::string& errorOut) {
     return fetchUrl("https://nextendo.network/api/online-counts", "nextendo.network", NEXTENDO_FALLBACK_IPS, errorOut);
 }
 
-// Fetches the counts document, retrying with a growing deadline.
+// Fetches the counts document, retrying a couple of times.
 //
-// A first request has to resolve DNS and complete a TLS handshake, and on this
-// console that occasionally ran past a single short timeout - which surfaced in
-// the panel as "Timeout was reached" and then fixed itself on the next poll.
-// Two things remove that:
-//
-//   * the request is retried here rather than waiting 15s for the next poll;
-//   * each attempt gets a progressively longer deadline, because the failed
-//     attempt has usually left the connection warmed up.
-//
-// Startup cost matters, so the total is capped: three attempts at 12s each is
-// the worst case, and only when every attempt fails.
+// The retry is for a transient failure, so the panel does not have to wait a
+// whole 15s poll interval for the next chance. Each attempt is short: the
+// address is already pinned by fetchUrl(), so there is no DNS stall to ride out,
+// and a long deadline would only keep a dead network on screen longer.
 std::string fetchCountsWithRetry(std::string& errorOut) {
     static const int kAttempts = 3;
 
@@ -310,8 +336,8 @@ std::string fetchCountsWithRetry(std::string& errorOut) {
         errorOut = lastError.empty() ? "empty response" : lastError;
 
         if (attempt + 1 < kAttempts) {
-            // Brief pause so a transient DNS or TLS hiccup can clear.
-            svcSleepThread(300'000'000LL);  // 300 ms
+            // Brief pause so a transient hiccup can clear.
+            svcSleepThread(150'000'000LL);  // 150 ms
         }
     }
 
