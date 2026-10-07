@@ -226,18 +226,21 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-// Lets curl resolve the hostname itself.
+// The address that last worked, reused so later requests skip the lookup.
+static std::string g_cachedIp;
+
+// Fetches a URL, pinning the address curl connects to.
 //
-// An earlier revision pinned the connection to the addresses in
-// NEXTENDO_FALLBACK_IPS via CURLOPT_RESOLVE to avoid a DNS lookup. That was
-// wrong: measured from a PC, connecting to those addresses directly times out
-// (20s, no response) while letting curl resolve the name returns 200 in ~1s. The
-// "optimisation" replaced the only working path with a broken one.
+// curl's own name resolution does not work in this process - letting it resolve
+// produced "Could not resolve host name" on a console where the applet browser
+// and every other network client is fine. libnx's resolver does work, so the
+// address is looked up with getaddrinfo() and handed to curl through
+// CURLOPT_RESOLVE instead.
+//
+// The URL, SNI and certificate checks all still use the hostname, so pinning the
+// address changes nothing about TLS.
 std::string fetchUrl(const std::string& url, const std::string& host,
                      const std::vector<std::string>& fallbackIps, std::string& errorOut) {
-    (void)host;
-    (void)fallbackIps;
-
     std::string responseBuffer;
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -248,13 +251,49 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);
+    // Generous, because the first connection of a session has to complete a TLS
+    // handshake and the console is not fast. A shorter cap only produced
+    // timeouts that the next poll then resolved on its own.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
+    struct curl_slist* resolveList = nullptr;
+
+    // Best candidate first: the address that served the last request.
+    if (!g_cachedIp.empty()) {
+        const std::string entry = host + ":443:" + g_cachedIp;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+
+    // Then whatever libnx's resolver reports for the name.
+    const std::string resolved = resolveHostToIp(host);
+    if (!resolved.empty() && resolved != g_cachedIp) {
+        const std::string entry = host + ":443:" + resolved;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+
+    // Last resort: the addresses compiled in, for when the lookup itself fails.
+    for (const auto& ip : fallbackIps) {
+        if (ip == g_cachedIp || ip == resolved) continue;
+        const std::string entry = host + ":443:" + ip;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+
+    if (resolveList) curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
+
     const CURLcode res = curl_easy_perform(curl);
+
+    if (res == CURLE_OK) {
+        char* usedIp = nullptr;
+        if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
+            g_cachedIp = usedIp;
+        }
+    }
+
+    if (resolveList) curl_slist_free_all(resolveList);
 
     if (res != CURLE_OK) {
         errorOut = curl_easy_strerror(res);
@@ -301,7 +340,7 @@ std::string fetchCountsWithRetry(std::string& errorOut) {
 
         if (attempt + 1 < kAttempts) {
             // Brief pause so a transient hiccup can clear.
-            svcSleepThread(150'000'000LL);  // 150 ms
+            svcSleepThread(250'000'000LL);  // 250 ms
         }
     }
 
