@@ -85,6 +85,13 @@ struct GameEntry {
     std::string status;
 };
 
+// One entry of the API's "jeux" array: a game and how many players
+// are on it. Declared here because a global holds a vector of these.
+struct JeuEntry {
+    std::string name;
+    int players = 0;
+};
+
 static std::vector<GameEntry> g_games;
 
 static Mutex g_mutex;
@@ -203,10 +210,6 @@ std::map<std::string, int> parseOnlineCounts(const std::string& rawJson) {
 //
 // This is what the status page itself displays, so it needs no title-id table
 // and no downloaded game list - the server names the games.
-struct JeuEntry {
-    std::string name;
-    int players = 0;
-};
 
 std::vector<JeuEntry> parseJeux(const std::string& rawJson) {
     std::vector<JeuEntry> result;
@@ -488,21 +491,23 @@ public:
     }
 
     virtual tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame("Nextendo \u7f51\u7edc",   // Nextendo 缃戠粶
-                                             "\u5728\u7ebf\u4eba\u6570");  // 鍦ㄧ嚎浜烘暟
-        m_list = new tsl::elm::List();
+        m_frame = new tsl::elm::OverlayFrame("Nextendo \u7f51\u7edc",       // Nextendo 网络
+                                             "\u5728\u7ebf\u4eba\u6570");    // 在线人数
+        auto* list = new tsl::elm::List();
 
         m_summaryHeader = new tsl::elm::CategoryHeader(
-            "\u5728\u7ebf\u4eba\u6570: --");  // 鍦ㄧ嚎浜烘暟: --
-        m_list->addItem(m_summaryHeader);
+            "\u5728\u7ebf\u4eba\u6570: --");                                 // 在线人数: --
+        list->addItem(m_summaryHeader);
 
-        m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");  // 娓告垙
-        m_list->addItem(m_sectionHeader);
+        m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");      // 游戏
+        list->addItem(m_sectionHeader);
 
-        // One placeholder row, replaced by refreshUI() once the list is known.
-        m_placeholder = new tsl::elm::ListItem("\u7b49\u5f85\u6570\u636e\u2026");  // 绛夊緟鏁版嵁鈥?        m_list->addItem(m_placeholder);
+        m_placeholder = new tsl::elm::ListItem(
+            "\u7b49\u5f85\u6570\u636e\u2026");                               // 等待数据…
+        list->addItem(m_placeholder);
 
-        m_frame->setContent(m_list);
+        m_frame->setContent(list);
+        m_list = list;
         refreshUI();
         return m_frame;
     }
@@ -513,26 +518,37 @@ public:
         }
     }
 
-    virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState &touchPos, HidAnalogStickState joyStickPosLeft, HidAnalogStickState joyStickPosRight) override {
+    virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState& touchPos,
+                             HidAnalogStickState joyStickPosLeft,
+                             HidAnalogStickState joyStickPosRight) override {
         return false;
     }
 
 private:
-    // Rebuilds the game rows whenever the set of games changes.
+    // Rebuilds the game rows when the set of games changes.
     //
-    // The list has to be reconstructed rather than edited in place, because
-    // rows are added and removed; tsl::elm::List has no removal API. The focus
-    // is dropped first, as libtesla requires before items are destroyed.
+    // The list has to be reconstructed rather than edited, because rows are
+    // added and removed and tsl::elm::List offers no removal API. removeFocus()
+    // comes first, as libtesla requires before items are destroyed.
     void rebuildGameRows(const std::vector<JeuEntry>& jeux) {
-        // Nothing to do while the same games are shown.
         std::vector<std::string> names;
         names.reserve(jeux.size());
         for (const auto& j : jeux) names.push_back(j.name);
-        if (names == m_shownNames) return;
+
+        // Nothing to do while the same games are shown; the per-game numbers are
+        // refreshed in place instead, which is the common case.
+        if (names == m_shownNames) {
+            for (const auto& j : jeux) {
+                auto it = m_rows.find(j.name);
+                if (it != m_rows.end() && it->second != nullptr) {
+                    it->second->setValue(std::to_string(j.players));
+                }
+            }
+            return;
+        }
 
         this->removeFocus();
 
-        // Build a fresh list, copying the header pointers' content across.
         auto* list = new tsl::elm::List();
 
         auto* summary = new tsl::elm::CategoryHeader(m_summaryText);
@@ -540,12 +556,15 @@ private:
         m_summaryHeader = summary;
 
         auto* section = new tsl::elm::CategoryHeader(
-            std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 娓告垙
+            std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
         list->addItem(section);
         m_sectionHeader = section;
 
+        m_rows.clear();
         for (const auto& j : jeux) {
-            list->addItem(new tsl::elm::ListItem(j.name, std::to_string(j.players)));
+            auto* item = new tsl::elm::ListItem(j.name, std::to_string(j.players));
+            list->addItem(item);
+            m_rows[j.name] = item;
         }
 
         m_frame->setContent(list);
@@ -556,12 +575,12 @@ private:
 
     void refreshUI() {
         mutexLock(&g_mutex);
-        auto errCopy = g_lastError;
-        bool haveData = !g_jeux.empty();
+        const std::string errCopy = g_lastError;
+        const bool haveData = !g_jeux.empty();
         std::vector<JeuEntry> jeux = g_jeux;
         mutexUnlock(&g_mutex);
 
-        // The subtitle carries the last update time.
+        // Subtitle: when the numbers were last updated.
         u64 timestamp;
         timeGetCurrentTime(TimeType_LocalSystemClock, &timestamp);
         TimeCalendarTime caltime;
@@ -569,26 +588,30 @@ private:
         timeToCalendarTimeWithMyRule(timestamp, &caltime, &addinfo);
         char timeBuf[40];
         snprintf(timeBuf, sizeof(timeBuf),
-                 "\u66f4\u65b0\u4e8e %02d:%02d:%02d",   // 鏇存柊浜?HH:MM:SS
+                 "\u66f4\u65b0\u4e8e %02d:%02d:%02d",                          // 更新于 HH:MM:SS
                  caltime.hour, caltime.minute, caltime.second);
         m_frame->setSubtitle(timeBuf);
 
-        // Total = sum of jeux[].joueurs, which is the number the website shows.
-        // It is deliberately not sum(counts): a title present in several regions
-        // repeats its player count once per regional title id.
-        int total = 0;
-        for (const auto& j : jeux) total += j.players;
-
         if (!haveData) {
-            m_summaryText = errCopy.empty()
-                                ? std::string("\u65e0\u6570\u636e")   // 鏃犳暟鎹?                                : errCopy;
+            if (errCopy.empty()) {
+                m_summaryText = "\u65e0\u6570\u636e";                         // 无数据
+            } else {
+                m_summaryText = errCopy;
+            }
             if (m_placeholder != nullptr) {
                 m_placeholder->setValue(m_summaryText, true);
             }
             return;
         }
 
-        m_summaryText = "\u5728\u7ebf\u4eba\u6570: " + std::to_string(total);  // 鍦ㄧ嚎浜烘暟:
+        // The total is sum(jeux[].joueurs), which is the figure the website
+        // shows. It is deliberately not sum(counts): a title present in several
+        // regions repeats its player count once per regional title id, so that
+        // would double-count.
+        int total = 0;
+        for (const auto& j : jeux) total += j.players;
+
+        m_summaryText = "\u5728\u7ebf\u4eba\u6570: " + std::to_string(total);  // 在线人数:
 
         // Busiest first.
         std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
@@ -605,10 +628,10 @@ private:
     tsl::elm::CategoryHeader* m_summaryHeader = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     tsl::elm::ListItem* m_placeholder = nullptr;
-    std::string m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";  // 鍦ㄧ嚎浜烘暟: --
+    std::map<std::string, tsl::elm::ListItem*> m_rows;
+    std::string m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";               // 在线人数: --
     std::vector<std::string> m_shownNames;
 };
-
 class OverlayTest : public tsl::Overlay {
 public:
     virtual void initServices() override {
