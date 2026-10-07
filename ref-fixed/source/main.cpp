@@ -1,4 +1,4 @@
-#define TESLA_INIT_IMPL
+﻿#define TESLA_INIT_IMPL
 #include <tesla.hpp>
 #include <switch.h>
 #include <curl/curl.h>
@@ -89,6 +89,8 @@ static std::vector<GameEntry> g_games;
 
 static Mutex g_mutex;
 static std::map<std::string, int> g_counts;
+// Per-game breakdown from the API's "jeux" array, and the running total.
+static std::vector<JeuEntry> g_jeux;
 static std::string g_lastError;
 static std::atomic<bool> g_dirty{false};
 static std::atomic<bool> g_overlayVisible{false};
@@ -189,6 +191,40 @@ std::map<std::string, int> parseOnlineCounts(const std::string& rawJson) {
             if (json_is_integer(value)) {
                 result[key] = (int)json_integer_value(value);
             }
+        }
+    }
+
+    json_decref(root);
+    return result;
+}
+
+// The per-game breakdown, straight out of the "jeux" array of
+// /api/online-counts: [{"nom":"Splatoon 3","joueurs":12}, ...].
+//
+// This is what the status page itself displays, so it needs no title-id table
+// and no downloaded game list - the server names the games.
+struct JeuEntry {
+    std::string name;
+    int players = 0;
+};
+
+std::vector<JeuEntry> parseJeux(const std::string& rawJson) {
+    std::vector<JeuEntry> result;
+    json_error_t error;
+    json_t* root = json_loads(rawJson.c_str(), 0, &error);
+    if (!root) return result;
+
+    json_t* jeux = json_object_get(root, "jeux");
+    if (json_is_array(jeux)) {
+        size_t index;
+        json_t* value;
+        json_array_foreach(jeux, index, value) {
+            JeuEntry entry;
+            json_t* jnom = json_object_get(value, "nom");
+            json_t* jjoueurs = json_object_get(value, "joueurs");
+            if (json_is_string(jnom)) entry.name = json_string_value(jnom);
+            if (json_is_integer(jjoueurs)) entry.players = (int)json_integer_value(jjoueurs);
+            if (!entry.name.empty()) result.push_back(entry);
         }
     }
 
@@ -324,9 +360,11 @@ static void pollThreadFunc(void*) {
             std::string error;
             std::string raw = fetchOnlineCounts(error);
             auto newCounts = parseOnlineCounts(raw);
+            auto newJeux = parseJeux(raw);
 
             mutexLock(&g_mutex);
             g_counts = newCounts;
+            g_jeux = newJeux;
             g_lastError = error;
             mutexUnlock(&g_mutex);
 
@@ -369,7 +407,7 @@ public:
             std::string combined;
             if (!m_game.version.empty()) combined += "v" + m_game.version;
             if (m_game.percent >= 0) {
-                if (!combined.empty()) combined += "  •  ";
+                if (!combined.empty()) combined += "  鈥? ";
                 combined += std::to_string(m_game.percent) + "% completo";
             }
             list->addItem(new tsl::elm::CategoryHeader(combined));
@@ -443,32 +481,28 @@ public:
         std::string raw = fetchOnlineCounts(error);
         mutexLock(&g_mutex);
         g_counts = parseOnlineCounts(raw);
+        g_jeux = parseJeux(raw);
         g_lastError = error;
         mutexUnlock(&g_mutex);
         g_dirty = true;
     }
 
     virtual tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame("Nextendo Status", "--:--:--");
-        auto list = new tsl::elm::List();
+        m_frame = new tsl::elm::OverlayFrame("Nextendo \u7f51\u7edc",   // Nextendo 缃戠粶
+                                             "\u5728\u7ebf\u4eba\u6570");  // 鍦ㄧ嚎浜烘暟
+        m_list = new tsl::elm::List();
 
-        m_summaryHeader = new tsl::elm::CategoryHeader("Jugadores en línea: --");
-        list->addItem(m_summaryHeader);
+        m_summaryHeader = new tsl::elm::CategoryHeader(
+            "\u5728\u7ebf\u4eba\u6570: --");  // 鍦ㄧ嚎浜烘暟: --
+        m_list->addItem(m_summaryHeader);
 
-        for (const auto& game : g_games) {
-            auto item = new tsl::elm::ListItem(game.name);
-            item->setClickListener([game](u64 keys) {
-                if (keys & HidNpadButton_A) {
-                    tsl::changeTo<GuiGameDetail>(game);
-                    return true;
-                }
-                return false;
-            });
-            list->addItem(item);
-            m_items[game.name] = item;
-        }
+        m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");  // 娓告垙
+        m_list->addItem(m_sectionHeader);
 
-        m_frame->setContent(list);
+        // One placeholder row, replaced by refreshUI() once the list is known.
+        m_placeholder = new tsl::elm::ListItem("\u7b49\u5f85\u6570\u636e\u2026");  // 绛夊緟鏁版嵁鈥?        m_list->addItem(m_placeholder);
+
+        m_frame->setContent(m_list);
         refreshUI();
         return m_frame;
     }
@@ -484,52 +518,95 @@ public:
     }
 
 private:
+    // Rebuilds the game rows whenever the set of games changes.
+    //
+    // The list has to be reconstructed rather than edited in place, because
+    // rows are added and removed; tsl::elm::List has no removal API. The focus
+    // is dropped first, as libtesla requires before items are destroyed.
+    void rebuildGameRows(const std::vector<JeuEntry>& jeux) {
+        // Nothing to do while the same games are shown.
+        std::vector<std::string> names;
+        names.reserve(jeux.size());
+        for (const auto& j : jeux) names.push_back(j.name);
+        if (names == m_shownNames) return;
+
+        this->removeFocus();
+
+        // Build a fresh list, copying the header pointers' content across.
+        auto* list = new tsl::elm::List();
+
+        auto* summary = new tsl::elm::CategoryHeader(m_summaryText);
+        list->addItem(summary);
+        m_summaryHeader = summary;
+
+        auto* section = new tsl::elm::CategoryHeader(
+            std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 娓告垙
+        list->addItem(section);
+        m_sectionHeader = section;
+
+        for (const auto& j : jeux) {
+            list->addItem(new tsl::elm::ListItem(j.name, std::to_string(j.players)));
+        }
+
+        m_frame->setContent(list);
+        m_list = list;
+        m_placeholder = nullptr;
+        m_shownNames = names;
+    }
+
     void refreshUI() {
         mutexLock(&g_mutex);
-        auto countsCopy = g_counts;
-        std::string errCopy = g_lastError;
+        auto errCopy = g_lastError;
+        bool haveData = !g_jeux.empty();
+        std::vector<JeuEntry> jeux = g_jeux;
         mutexUnlock(&g_mutex);
 
+        // The subtitle carries the last update time.
         u64 timestamp;
         timeGetCurrentTime(TimeType_LocalSystemClock, &timestamp);
         TimeCalendarTime caltime;
         TimeCalendarAdditionalInfo addinfo;
         timeToCalendarTimeWithMyRule(timestamp, &caltime, &addinfo);
-        char timeBuf[32];
-        snprintf(timeBuf, sizeof(timeBuf), "Última act.: %02d:%02d:%02d", caltime.hour, caltime.minute, caltime.second);
+        char timeBuf[40];
+        snprintf(timeBuf, sizeof(timeBuf),
+                 "\u66f4\u65b0\u4e8e %02d:%02d:%02d",   // 鏇存柊浜?HH:MM:SS
+                 caltime.hour, caltime.minute, caltime.second);
         m_frame->setSubtitle(timeBuf);
 
-        int totalOnline = 0;
-        for (const auto& game : g_games) {
-            int maxCount = 0;
-            bool anyOnline = false;
-            for (const auto& id : game.ids) {
-                auto it = countsCopy.find(id);
-                if (it != countsCopy.end()) {
-                    anyOnline = true;
-                    maxCount = std::max(maxCount, it->second);
-                }
+        // Total = sum of jeux[].joueurs, which is the number the website shows.
+        // It is deliberately not sum(counts): a title present in several regions
+        // repeats its player count once per regional title id.
+        int total = 0;
+        for (const auto& j : jeux) total += j.players;
+
+        if (!haveData) {
+            m_summaryText = errCopy.empty()
+                                ? std::string("\u65e0\u6570\u636e")   // 鏃犳暟鎹?                                : errCopy;
+            if (m_placeholder != nullptr) {
+                m_placeholder->setValue(m_summaryText, true);
             }
-            if (anyOnline) {
-                totalOnline += maxCount;
-                m_items[game.name]->setValue(std::to_string(maxCount) + " jugadores", false);
-            } else {
-                m_items[game.name]->setValue("Offline", true);
-            }
+            return;
         }
 
-        char summaryBuf[48];
-        if (countsCopy.empty()) {
-            snprintf(summaryBuf, sizeof(summaryBuf), "%s", errCopy.empty() ? "Sin datos" : errCopy.c_str());
-        } else {
-            snprintf(summaryBuf, sizeof(summaryBuf), "Jugadores en línea: %d", totalOnline);
-        }
-        m_summaryHeader->setText(summaryBuf);
+        m_summaryText = "\u5728\u7ebf\u4eba\u6570: " + std::to_string(total);  // 鍦ㄧ嚎浜烘暟:
+
+        // Busiest first.
+        std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
+            if (a.players != b.players) return a.players > b.players;
+            return a.name < b.name;
+        });
+
+        rebuildGameRows(jeux);
+        m_summaryHeader->setText(m_summaryText);
     }
 
-    tsl::elm::OverlayFrame* m_frame;
-    tsl::elm::CategoryHeader* m_summaryHeader;
-    std::map<std::string, tsl::elm::ListItem*> m_items;
+    tsl::elm::OverlayFrame* m_frame = nullptr;
+    tsl::elm::List* m_list = nullptr;
+    tsl::elm::CategoryHeader* m_summaryHeader = nullptr;
+    tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
+    tsl::elm::ListItem* m_placeholder = nullptr;
+    std::string m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";  // 鍦ㄧ嚎浜烘暟: --
+    std::vector<std::string> m_shownNames;
 };
 
 class OverlayTest : public tsl::Overlay {
