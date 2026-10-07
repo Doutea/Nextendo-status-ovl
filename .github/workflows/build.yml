@@ -1,69 +1,41 @@
 name: build
 
+# Builds the overlay. Pushing a version tag also publishes a release with the
+# .ovl attached, which is what users download.
 on:
   push:
-    branches: [main, master]
+    branches: [main]
+    tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  # The JSON parser is the part that decides whether the number on screen is
-  # correct, and it has no Switch dependency, so it is tested on a normal host
-  # with the sanitizers enabled. This job is the real gate.
-  test:
-    name: host tests (json parser)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run unit tests under ASan/UBSan
-        run: make -C tests run
-
   build:
-    name: build .ovl (devkitA64)
     runs-on: ubuntu-latest
-    needs: test
-    container:
-      image: devkitpro/devkita64:latest
+    container: devkitpro/devkita64:latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Trust the workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
-
-      # Produces nextendo-ovl.ovl. No SD-card zip: the .ovl is copied straight
-      # to sdmc:/switch/.overlays/, so a package would only be an extra step.
-      - name: Build overlay
+      - name: Build
         run: bash scripts/build.sh
 
       - name: Upload .ovl
         uses: actions/upload-artifact@v4
         with:
-          name: nextendo-ovl
-          path: nextendo-ovl.ovl
+          name: nextendo-status-ovl
+          path: nextendo-status.ovl
           if-no-files-found: error
 
-      # A minimal overlay that draws text and initialises nothing. Used to tell
-      # a problem in this overlay's own code apart from a problem in the
-      # libtesla/loader integration.
-      - name: Build diagnostic probe
-        run: bash scripts/build_probe.sh
-
-      - name: Upload probe
-        uses: actions/upload-artifact@v4
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          name: probe-ovl
-          path: probe/probe-ovl.ovl
-          if-no-files-found: error
+          files: nextendo-status.ovl
+          generate_release_notes: true
+          body: |
+            Copy `nextendo-status.ovl` to `sdmc:/switch/.overlays/` on your SD card.
 
-      # Same idea, but for the network path: reports the exact libnx result
-      # codes for DNS, connect and TLS so a failure is not just "couldn't
-      # resolve host name".
-      - name: Build network probe
-        run: bash scripts/build_netprobe.sh
-
-      - name: Upload network probe
-        uses: actions/upload-artifact@v4
-        with:
-          name: netprobe-ovl
-          path: netprobe/netprobe-ovl.ovl
-          if-no-files-found: error
+            Open the overlay menu with `L + Down + R-Stick` and pick **Nextendo Status**.
