@@ -79,10 +79,9 @@ using namespace std::literals::chrono_literals;
 // Default returns false, so any overlay that does not define these still links
 // and simply gets the English labels. The overlay that does care replaces it:
 // its definition is strong, which overrides this weak one at link time.
-extern "C" [[gnu::weak]] bool nextendoIsChinese() {
-    return false;
-}
+extern "C" bool nextendoIsChinese();
 [[maybe_unused]] static inline bool teslaFooterIsChinese() {
+    if (nextendoIsChinese == nullptr) return false;
     return nextendoIsChinese();
 }
 [[maybe_unused]] static inline const char* teslaFooterHints() {
