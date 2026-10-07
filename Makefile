@@ -1,24 +1,4 @@
-#---------------------------------------------------------------------------------
-# Nextendo Overlay — player counts for the Nextendo Network, from the Tesla /
-# Ultrahand overlay menu.
-#
-# An .ovl is a libnx homebrew NRO with a different extension, loaded by the
-# nx-ovlloader sysmodule. There is no Atmosphère-specific build step: we link
-# against switch.specs and convert the ELF with elf2nro.
-#
-# Built on WerWolv's libtesla rather than libultrahand on purpose: every overlay
-# confirmed working on the target console (NX-FanControl, FPSLocker,
-# Status-Monitor, EdiZon) is built this way, and a libultrahand build of this
-# same overlay crashed the loader on launch (Atmosphère fatal 2345-0002, PC=0).
-# Ultrahand is a drop-in Tesla replacement, so a plain libtesla overlay is listed
-# and launched normally.
-#
-# Local build (inside the devkitPro MSYS2 shell):
-#   pacman -S --needed switch-dev switch-curl switch-zlib
-#   make
-#
-# The result is nextendo-ovl.ovl, to copy to sdmc:/switch/.overlays/.
-#---------------------------------------------------------------------------------
+﻿#---------------------------------------------------------------------------------
 .SUFFIXES:
 #---------------------------------------------------------------------------------
 
@@ -30,35 +10,47 @@ TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libnx/switch_rules
 
 #---------------------------------------------------------------------------------
-# NACP is REQUIRED, not optional.
+# TARGET is the name of the output
+# BUILD is the directory where object files & intermediate files will be placed
+# SOURCES is a list of directories containing source code
+# DATA is a list of directories containing data files
+# INCLUDES is a list of directories containing header files
+# ROMFS is the directory containing data to be added to RomFS, relative to the Makefile (Optional)
 #
-# Ultrahand's getOverlayInfo() reads the NACP resource elf2nro appends after the
-# NRO and takes the overlay's display name and version from it. Without the NACP
-# it returns ResultParseError, the menu loop does `if (result != ResultSuccess)
-# continue;`, and the overlay never appears at all.
+# NO_ICON: if set to anything, do not use icon.
+# NO_NACP: if set to anything, no .nacp file is generated.
+# APP_TITLE is the name of the app stored in the .nacp file (Optional)
+# APP_AUTHOR is the author of the app stored in the .nacp file (Optional)
+# APP_VERSION is the version of the app stored in the .nacp file (Optional)
+# APP_TITLEID is the titleID of the app stored in the .nacp file (Optional)
+# ICON is the filename of the icon (.jpg), relative to the project folder.
+#   If not set, it attempts to use one of the following (in this order):
+#     - <Project name>.jpg
+#     - icon.jpg
+#     - <libnx folder>/default_icon.jpg
 #
-# An icon is not required: elf2nro falls back to libnx's default_icon.jpg.
+# CONFIG_JSON is the filename of the NPDM config file (.json), relative to the project folder.
+#   If not set, it attempts to use one of the following (in this order):
+#     - <Project name>.json
+#     - config.json
+#   If a JSON file is provided or autodetected, an ExeFS PFS0 (.nsp) is built instead
+#   of a homebrew executable (.nro). This is intended to be used for sysmodules.
+#   NACP building is skipped as well.
 #---------------------------------------------------------------------------------
-APP_TITLE	:=	Nextendo
-APP_AUTHOR	:=	Nextendo Overlay
-APP_VERSION	:=	1.0.0
+APP_TITLE	:=	Nextendo Status
+APP_VERSION := 1.0.4
 
-TARGET		:=	nextendo-ovl
+TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
-INCLUDES	:=	include source libs/libtesla/include
+INCLUDES	:=	include libs/libtesla/include
 
-NO_ICON		:=	1
+NO_ICON		:=  1
 
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
-# Flags mirror an overlay that is known to work on the target console
-# (NX-FanControl): same ARCH including -mtp=soft, and no -Wl,--gc-sections.
-# -mtp=soft matters here: devkitA64 patches the thread-pointer model, and
-# omitting it changes TLS addressing, which overlays are sensitive to because
-# libnx stores its thread vars in TLS.
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
@@ -66,22 +58,19 @@ CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__
 
-# -fno-rtti is deliberately NOT used: libtesla's List uses dynamic_cast, so RTTI
-# has to stay enabled. -fno-exceptions is safe here.
 CXXFLAGS	:= $(CFLAGS) -fno-exceptions -std=c++20
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-# libcurl is built by devkitPro with its TLS backend pointed at libnx's own
-# `ssl` service (CURLSSLBACKEND_LIBNX), so HTTPS needs no CA bundle of our own.
-LIBS	:= -lcurl -lz -lnx
+LIBS := -lcurl -ljansson -lmbedtls -lmbedx509 -lmbedcrypto -lz -lnx
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
 # include and lib
 #---------------------------------------------------------------------------------
 LIBDIRS	:= $(PORTLIBS) $(LIBNX)
+
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
@@ -119,7 +108,7 @@ endif
 
 export OFILES_BIN	:=	$(addsuffix .o,$(BINFILES))
 export OFILES_SRC	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
-export OFILES	:=	$(OFILES_BIN) $(OFILES_SRC)
+export OFILES 	:=	$(OFILES_BIN) $(OFILES_SRC)
 export HFILES_BIN	:=	$(addsuffix .h,$(subst .,_,$(BINFILES)))
 
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
@@ -141,6 +130,19 @@ else
 	export APP_JSON := $(TOPDIR)/$(CONFIG_JSON)
 endif
 
+ifeq ($(strip $(ICON)),)
+	icons := $(wildcard *.jpg)
+	ifneq (,$(findstring $(TARGET).jpg,$(icons)))
+		export APP_ICON := $(TOPDIR)/$(TARGET).jpg
+	else
+		ifneq (,$(findstring icon.jpg,$(icons)))
+			export APP_ICON := $(TOPDIR)/icon.jpg
+		endif
+	endif
+else
+	export APP_ICON := $(TOPDIR)/$(ICON)
+endif
+
 ifeq ($(strip $(NO_ICON)),)
 	export NROFLAGS += --icon=$(APP_ICON)
 endif
@@ -157,10 +159,11 @@ ifneq ($(ROMFS),)
 	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: $(BUILD) clean all test
+.PHONY: $(BUILD) clean all
 
 #---------------------------------------------------------------------------------
 all: $(BUILD)
+
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
@@ -168,14 +171,8 @@ $(BUILD):
 
 #---------------------------------------------------------------------------------
 clean:
-	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).ovl $(TARGET).nro $(TARGET).nacp $(TARGET).elf out $(TARGET)-sd.zip
+	@rm -fr $(BUILD) $(TARGET).ovl $(TARGET).nro $(TARGET).nacp $(TARGET).elf
 
-#---------------------------------------------------------------------------------
-# Host-side unit tests for the JSON parser (no devkitA64 needed).
-#---------------------------------------------------------------------------------
-test:
-	@$(MAKE) --no-print-directory -C tests run
 
 #---------------------------------------------------------------------------------
 else
@@ -186,21 +183,11 @@ DEPENDS	:=	$(OFILES:.o=.d)
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
-all	:	$(OUTPUT).ovl
+all	:	 $(OUTPUT).ovl
 
-# An overlay is an NRO with the .ovl extension.
-#
-# The .nacp prerequisite is essential, not cosmetic: `--nacp=` is passed to
-# elf2nro below, and listing it here is what triggers switch_rules' `%.nacp`
-# rule. Without it elf2nro fails with "Failed to open input nacp!", and without
-# the NACP inside the NRO the overlay is silently skipped by Ultrahand.
-#
-# No 'ULTR' trailer is appended: libultrahand-based overlays carry it, but this
-# one is built on plain libtesla like the overlays known to work on the target
-# console, none of which have it.
-$(OUTPUT).ovl		:	$(OUTPUT).elf $(OUTPUT).nacp
+$(OUTPUT).ovl		:	$(OUTPUT).elf $(OUTPUT).nacp 
 	@elf2nro $< $@ $(NROFLAGS)
-	@echo "built ... $(notdir $(OUTPUT).ovl) (libtesla build, NACP embedded)"
+	@echo "built ... $(notdir $(OUTPUT).ovl)"
 
 $(OUTPUT).elf	:	$(OFILES)
 
