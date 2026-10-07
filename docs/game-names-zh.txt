@@ -1,0 +1,50 @@
+# Nextendo Status Overlay - game name translations
+#
+# One game per line, in the form:
+#
+#     English name | Chinese name
+#
+# The English name (left of the |) must match the API's "nom" field EXACTLY,
+# including punctuation and accents - that is how a row is matched. The Chinese
+# name (right of the |) is what the overlay displays; change it freely.
+#
+# Games not listed here still appear, shown with the API's own name.
+#
+# To add a game: copy a line, replace the left side with the API's name (check
+# https://nextendo.network/api/online-counts) and the right side with what you
+# want shown. Keep one game per line.
+#
+# Lines starting with # are ignored.
+
+Super Smash Bros. Ultimate                                 | 任天堂全明星大乱斗
+Mario Kart 8 Deluxe                                        | 马力欧赛车 8 豪华版
+Super Mario Maker 2                                        | 超级马力欧制造 2
+Minecraft Dungeons II                                      | 我的世界：地牢 II
+Crash Team Racing Nitro-Fueled                             | 古惑狼赛车宝贝车
+Splatoon 3                                                 | 斯普拉遁 3
+Pokémon Scarlet                                            | 宝可梦 朱
+Légendes Pokémon : Z-A                                     | 宝可梦传说 Z-A
+Nintendo 64 – Nintendo Classics                            | Nintendo 64 经典合集
+Minecraft: Nintendo Switch Edition                         | 我的世界：Switch 版
+Diablo III: Eternal Collection                             | 暗黑破坏神 III：永恒之战
+POKKÉN TOURNAMENT DX                                       | 宝可拳 DX
+SUPER MARIO BROS. 35                                       | 超级马力欧兄弟 35
+PAC-MAN 99                                                 | 吃豆人 99
+Mario Tennis Aces                                          | 马力欧网球 超级扣杀
+Overcooked! 2                                              | 胡闹厨房 2
+Super Mario Odyssey                                        | 超级马力欧 奥德赛
+TETRIS 99                                                  | 俄罗斯方块 99
+Super Mario Bros. Wonder                                   | 超级马力欧兄弟 惊奇
+Saints Row: The Third - The Full Package                   | 黑道圣徒 3：完整版
+Splatoon 2                                                 | 斯普拉遁 2
+Just Shapes & Beats                                        | 形状与音符
+Luigi's Mansion 3                                          | 路易吉鬼屋 3
+Clubhouse Games: 51 Worldwide Classics                     | 世界游戏大全 51
+ARMS                                                       | ARMS
+Animal Crossing: New Horizons                              | 动物森友会
+Mario Party Superstars                                     | 马力欧派对 超级巨星
+Mario Strikers: Battle League                              | 马力欧足球：超级州际联赛
+Mario Golf: Super Rush                                     | 马力欧高尔夫：超级冲刺
+METAL GEAR SOLID: Peace Walker - Master Collection Version | 合金装备：和平行者
+MONSTER HUNTER GENERATIONS ULTIMATE                        | 怪物猎人 XX
+Pokémon Violet                                             | 宝可梦 紫
