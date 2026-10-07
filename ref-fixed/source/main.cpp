@@ -150,7 +150,7 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
@@ -501,9 +501,8 @@ private:
 
 class GuiTest : public tsl::Gui {
 public:
-    // No I/O here. Fetching in the constructor is what made the panel take
-    // seconds to appear; the polling thread now does it and the panel opens
-    // straight away showing "loading".
+    // No I/O here: fetching in the constructor is what made the panel take
+    // seconds to appear. The polling thread does it, and the panel opens at once.
     GuiTest() = default;
 
     virtual tsl::elm::Element* createUI() override {
@@ -511,33 +510,25 @@ public:
                                              "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
         auto* list = new tsl::elm::List();
 
-        // --- online count -----------------------------------------------------
-        m_summaryHeader = new tsl::elm::CategoryHeader(
-            "\u5728\u7ebf\u4eba\u6570: --");                                 // 在线人数: --
-        list->addItem(m_summaryHeader);
-
-        m_totalItem = new tsl::elm::ListItem(
-            "\u5f53\u524d\u5728\u7ebf", "--");                               // 当前在线
-        list->addItem(m_totalItem);
-
-        // --- refresh row ------------------------------------------------------
+        // One row for the count, which is also the refresh control: selecting it
+        // and pressing A asks the polling thread for an immediate fetch. An
+        // earlier revision had a separate "refresh status" row, which duplicated
+        // this one.
         //
-        // Selectable: pressing A asks the polling thread for an immediate fetch.
         // A click listener must always be set, because Element::onClick() calls
         // it unconditionally and an empty std::function would abort.
-        m_refreshItem = new tsl::elm::ListItem(
-            "\u5237\u65b0\u72b6\u6001",                                       // 刷新状态
-            "\u6309 A");                                                     // 按 A
-        m_refreshItem->setClickListener([](u64 keys) {
+        m_totalItem = new tsl::elm::ListItem(
+            "\u5f53\u524d\u5728\u7ebf",                                       // 当前在线
+            m_totalText);
+        m_totalItem->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
                 return true;
             }
             return false;
         });
-        list->addItem(m_refreshItem);
+        list->addItem(m_totalItem);
 
-        // --- per-game list ----------------------------------------------------
         m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");      // 游戏
         list->addItem(m_sectionHeader);
 
@@ -554,17 +545,6 @@ public:
     virtual void update() override {
         if (g_dirty.exchange(false)) {
             refreshUI();
-        }
-        // Keep the refresh row's value in step with the request state.
-        if (m_refreshItem != nullptr) {
-            const bool busy = g_refreshing.load();
-            if (busy != m_refreshBusyShown) {
-                m_refreshBusyShown = busy;
-                m_refreshItem->setValue(
-                    busy ? std::string("\u5237\u65b0\u4e2d\u2026")           // 刷新中…
-                         : std::string("\u6309 A"),                          // 按 A
-                    busy);
-            }
         }
     }
 
@@ -585,8 +565,8 @@ private:
         names.reserve(jeux.size());
         for (const auto& j : jeux) names.push_back(j.name);
 
-        // Same games as before: just refresh the numbers in place. This is the
-        // common case, and it avoids disturbing the selection.
+        // Same games as before: refresh the numbers in place. That is the common
+        // case and it leaves the selection alone.
         if (names == m_shownNames) {
             for (const auto& j : jeux) {
                 auto it = m_rows.find(j.name);
@@ -603,28 +583,17 @@ private:
 
         auto* list = new tsl::elm::List();
 
-        auto* summary = new tsl::elm::CategoryHeader(m_summaryText);
-        list->addItem(summary);
-        m_summaryHeader = summary;
-
-        auto* total = new tsl::elm::ListItem("\u5f53\u524d\u5728\u7ebf",   // 当前在线
+        auto* total = new tsl::elm::ListItem("\u5f53\u524d\u5728\u7ebf",     // 当前在线
                                              m_totalText);
-        list->addItem(total);
-        m_totalItem = total;
-
-        // The refresh row keeps its listener across a rebuild.
-        auto* refresh = new tsl::elm::ListItem("\u5237\u65b0\u72b6\u6001",   // 刷新状态
-                                               "\u6309 A");                  // 按 A
-        refresh->setClickListener([](u64 keys) {
+        total->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
                 return true;
             }
             return false;
         });
-        list->addItem(refresh);
-        m_refreshItem = refresh;
-        m_refreshBusyShown = false;
+        list->addItem(total);
+        m_totalItem = total;
 
         auto* section = new tsl::elm::CategoryHeader(
             std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
@@ -672,22 +641,17 @@ private:
 
         if (!haveData) {
             // Nothing has arrived yet, or the last attempt failed.
-            const bool busy = g_refreshing.load();
-            if (busy) {
-                m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
+            if (g_refreshing.load()) {
+                m_totalText = "\u5237\u65b0\u4e2d\u2026";                     // 刷新中…
             } else if (errCopy.empty()) {
                 m_totalText = "\u7b49\u5f85\u6570\u636e\u2026";               // 等待数据…
             } else {
                 m_totalText = errCopy;
             }
-            m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";                    // 在线人数: --
-            m_summaryHeader->setText(m_summaryText);
             if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
             if (m_placeholder != nullptr) m_placeholder->setValue(m_totalText, true);
             return;
         }
-
-        m_summaryText = "\u5728\u7ebf\u4eba\u6570: " + std::to_string(total);  // 在线人数:
 
         // Busiest first.
         std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
@@ -695,23 +659,20 @@ private:
             return a.name < b.name;
         });
 
-        rebuildGameRows(jeux);
-        m_summaryHeader->setText(m_summaryText);
+        // With data in hand the row shows the number itself. A refresh in flight
+        // only changes the subtitle, so the count stays readable.
         m_totalText = std::to_string(total);
+        rebuildGameRows(jeux);
         if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText);
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
     tsl::elm::List* m_list = nullptr;
-    tsl::elm::CategoryHeader* m_summaryHeader = nullptr;
     tsl::elm::ListItem* m_totalItem = nullptr;
-    tsl::elm::ListItem* m_refreshItem = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     tsl::elm::ListItem* m_placeholder = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
-    std::string m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";               // 在线人数: --
     std::string m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
-    bool m_refreshBusyShown = false;
     std::vector<std::string> m_shownNames;
 };
 class OverlayTest : public tsl::Overlay {
