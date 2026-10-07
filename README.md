@@ -1,14 +1,9 @@
-<div align="center">
+<h1 align="center">Nextendo 在线状态</h1>
 
-# Nextendo 在线状态
-
-**在 Switch 上直接查看 Nextendo Network 的在线人数**
-
-[简体中文](#-简体中文) · [English](#-english)
-
-<a id="-简体中文"></a>
-
-</div>
+<p align="center">
+  <b>在 Switch 上直接查看 Nextendo Network 的在线人数</b><br>
+  <a href="#english">English</a>
+</p>
 
 ---
 
@@ -96,13 +91,7 @@
 
 ---
 
-<div align="center">
-
-<a id="-english"></a>
-
 # English
-
-</div>
 
 **Nextendo Status** is a Nintendo Switch overlay that shows how many players are
 online on [Nextendo Network](https://nextendo.network/status.html) — without
