@@ -1,4 +1,4 @@
-﻿#define TESLA_INIT_IMPL
+#define TESLA_INIT_IMPL
 #include <tesla.hpp>
 #include <switch.h>
 #include <curl/curl.h>
@@ -150,7 +150,7 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
@@ -357,25 +357,47 @@ void loadGamesConfig() {
 }
 
 // --- Hilo de polling ---
+// Set by the refresh row's listener to request an immediate fetch.
+static std::atomic<bool> g_refreshRequested{false};
+// True while a fetch started by the user is in flight, so the row can show it.
+static std::atomic<bool> g_refreshing{false};
+
 static void pollThreadFunc(void*) {
+    // The game-config download used to run in initServices(), which meant the
+    // panel could not be drawn until the request had finished. It only feeds the
+    // per-title detail view, so it happens here instead, off the critical path.
+    loadGamesConfig();
+
     while (g_threadRunning.load()) {
-        if (g_overlayVisible.load()) {
+        const bool requested = g_refreshRequested.exchange(false);
+
+        if (g_overlayVisible.load() || requested) {
+            if (requested) g_refreshing = true;
+
             std::string error;
             std::string raw = fetchOnlineCounts(error);
             auto newCounts = parseOnlineCounts(raw);
             auto newJeux = parseJeux(raw);
 
-            mutexLock(&g_mutex);
-            g_counts = newCounts;
-            g_jeux = newJeux;
-            g_lastError = error;
-            mutexUnlock(&g_mutex);
+            {
+                mutexLock(&g_mutex);
+                // Keep the last good numbers if this attempt returned nothing,
+                // so a transient failure does not blank the panel.
+                if (!newJeux.empty() || g_jeux.empty()) {
+                    g_counts = newCounts;
+                    g_jeux = newJeux;
+                }
+                g_lastError = error;
+                mutexUnlock(&g_mutex);
+            }
 
+            g_refreshing = false;
             g_dirty = true;
         }
 
         for (int i = 0; i < 15 && g_threadRunning.load(); i++) {
             svcSleepThread(1'000'000'000LL);
+            if (g_refreshRequested.load()) break;
         }
     }
 }
@@ -410,7 +432,7 @@ public:
             std::string combined;
             if (!m_game.version.empty()) combined += "v" + m_game.version;
             if (m_game.percent >= 0) {
-                if (!combined.empty()) combined += "  鈥? ";
+                if (!combined.empty()) combined += "  閳? ";
                 combined += std::to_string(m_game.percent) + "% completo";
             }
             list->addItem(new tsl::elm::CategoryHeader(combined));
@@ -479,26 +501,43 @@ private:
 
 class GuiTest : public tsl::Gui {
 public:
-    GuiTest() {
-        std::string error;
-        std::string raw = fetchOnlineCounts(error);
-        mutexLock(&g_mutex);
-        g_counts = parseOnlineCounts(raw);
-        g_jeux = parseJeux(raw);
-        g_lastError = error;
-        mutexUnlock(&g_mutex);
-        g_dirty = true;
-    }
+    // No I/O here. Fetching in the constructor is what made the panel take
+    // seconds to appear; the polling thread now does it and the panel opens
+    // straight away showing "loading".
+    GuiTest() = default;
 
     virtual tsl::elm::Element* createUI() override {
         m_frame = new tsl::elm::OverlayFrame("Nextendo \u7f51\u7edc",       // Nextendo 网络
-                                             "\u5728\u7ebf\u4eba\u6570");    // 在线人数
+                                             "\u52a0\u8f7d\u4e2d\u2026");    // 加载中…
         auto* list = new tsl::elm::List();
 
+        // --- online count -----------------------------------------------------
         m_summaryHeader = new tsl::elm::CategoryHeader(
             "\u5728\u7ebf\u4eba\u6570: --");                                 // 在线人数: --
         list->addItem(m_summaryHeader);
 
+        m_totalItem = new tsl::elm::ListItem(
+            "\u5f53\u524d\u5728\u7ebf", "--");                               // 当前在线
+        list->addItem(m_totalItem);
+
+        // --- refresh row ------------------------------------------------------
+        //
+        // Selectable: pressing A asks the polling thread for an immediate fetch.
+        // A click listener must always be set, because Element::onClick() calls
+        // it unconditionally and an empty std::function would abort.
+        m_refreshItem = new tsl::elm::ListItem(
+            "\u5237\u65b0\u72b6\u6001",                                       // 刷新状态
+            "\u6309 A");                                                     // 按 A
+        m_refreshItem->setClickListener([](u64 keys) {
+            if ((keys & HidNpadButton_A) != 0) {
+                g_refreshRequested = true;
+                return true;
+            }
+            return false;
+        });
+        list->addItem(m_refreshItem);
+
+        // --- per-game list ----------------------------------------------------
         m_sectionHeader = new tsl::elm::CategoryHeader("\u6e38\u620f");      // 游戏
         list->addItem(m_sectionHeader);
 
@@ -516,6 +555,17 @@ public:
         if (g_dirty.exchange(false)) {
             refreshUI();
         }
+        // Keep the refresh row's value in step with the request state.
+        if (m_refreshItem != nullptr) {
+            const bool busy = g_refreshing.load();
+            if (busy != m_refreshBusyShown) {
+                m_refreshBusyShown = busy;
+                m_refreshItem->setValue(
+                    busy ? std::string("\u5237\u65b0\u4e2d\u2026")           // 刷新中…
+                         : std::string("\u6309 A"),                          // 按 A
+                    busy);
+            }
+        }
     }
 
     virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState& touchPos,
@@ -527,16 +577,16 @@ public:
 private:
     // Rebuilds the game rows when the set of games changes.
     //
-    // The list has to be reconstructed rather than edited, because rows are
-    // added and removed and tsl::elm::List offers no removal API. removeFocus()
-    // comes first, as libtesla requires before items are destroyed.
+    // The list is reconstructed rather than edited, because rows are added and
+    // removed and tsl::elm::List offers no removal API. removeFocus() comes
+    // first, as libtesla requires before items are destroyed.
     void rebuildGameRows(const std::vector<JeuEntry>& jeux) {
         std::vector<std::string> names;
         names.reserve(jeux.size());
         for (const auto& j : jeux) names.push_back(j.name);
 
-        // Nothing to do while the same games are shown; the per-game numbers are
-        // refreshed in place instead, which is the common case.
+        // Same games as before: just refresh the numbers in place. This is the
+        // common case, and it avoids disturbing the selection.
         if (names == m_shownNames) {
             for (const auto& j : jeux) {
                 auto it = m_rows.find(j.name);
@@ -544,6 +594,8 @@ private:
                     it->second->setValue(std::to_string(j.players));
                 }
             }
+            m_sectionHeader->setText(
+                std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
             return;
         }
 
@@ -554,6 +606,25 @@ private:
         auto* summary = new tsl::elm::CategoryHeader(m_summaryText);
         list->addItem(summary);
         m_summaryHeader = summary;
+
+        auto* total = new tsl::elm::ListItem("\u5f53\u524d\u5728\u7ebf",   // 当前在线
+                                             m_totalText);
+        list->addItem(total);
+        m_totalItem = total;
+
+        // The refresh row keeps its listener across a rebuild.
+        auto* refresh = new tsl::elm::ListItem("\u5237\u65b0\u72b6\u6001",   // 刷新状态
+                                               "\u6309 A");                  // 按 A
+        refresh->setClickListener([](u64 keys) {
+            if ((keys & HidNpadButton_A) != 0) {
+                g_refreshRequested = true;
+                return true;
+            }
+            return false;
+        });
+        list->addItem(refresh);
+        m_refreshItem = refresh;
+        m_refreshBusyShown = false;
 
         auto* section = new tsl::elm::CategoryHeader(
             std::string("\u6e38\u620f (") + std::to_string(jeux.size()) + ")");  // 游戏
@@ -592,24 +663,29 @@ private:
                  caltime.hour, caltime.minute, caltime.second);
         m_frame->setSubtitle(timeBuf);
 
-        if (!haveData) {
-            if (errCopy.empty()) {
-                m_summaryText = "\u65e0\u6570\u636e";                         // 无数据
-            } else {
-                m_summaryText = errCopy;
-            }
-            if (m_placeholder != nullptr) {
-                m_placeholder->setValue(m_summaryText, true);
-            }
-            return;
-        }
-
         // The total is sum(jeux[].joueurs), which is the figure the website
         // shows. It is deliberately not sum(counts): a title present in several
         // regions repeats its player count once per regional title id, so that
         // would double-count.
         int total = 0;
         for (const auto& j : jeux) total += j.players;
+
+        if (!haveData) {
+            // Nothing has arrived yet, or the last attempt failed.
+            const bool busy = g_refreshing.load();
+            if (busy) {
+                m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
+            } else if (errCopy.empty()) {
+                m_totalText = "\u7b49\u5f85\u6570\u636e\u2026";               // 等待数据…
+            } else {
+                m_totalText = errCopy;
+            }
+            m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";                    // 在线人数: --
+            m_summaryHeader->setText(m_summaryText);
+            if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
+            if (m_placeholder != nullptr) m_placeholder->setValue(m_totalText, true);
+            return;
+        }
 
         m_summaryText = "\u5728\u7ebf\u4eba\u6570: " + std::to_string(total);  // 在线人数:
 
@@ -621,15 +697,21 @@ private:
 
         rebuildGameRows(jeux);
         m_summaryHeader->setText(m_summaryText);
+        m_totalText = std::to_string(total);
+        if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText);
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
     tsl::elm::List* m_list = nullptr;
     tsl::elm::CategoryHeader* m_summaryHeader = nullptr;
+    tsl::elm::ListItem* m_totalItem = nullptr;
+    tsl::elm::ListItem* m_refreshItem = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
     tsl::elm::ListItem* m_placeholder = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
     std::string m_summaryText = "\u5728\u7ebf\u4eba\u6570: --";               // 在线人数: --
+    std::string m_totalText = "\u52a0\u8f7d\u4e2d\u2026";                     // 加载中…
+    bool m_refreshBusyShown = false;
     std::vector<std::string> m_shownNames;
 };
 class OverlayTest : public tsl::Overlay {
@@ -643,7 +725,10 @@ public:
         curl_global_init(CURL_GLOBAL_DEFAULT);
         mutexInit(&g_mutex);
 
-        loadGamesConfig();
+        // Nothing here performs network I/O any more. The game-config download
+        // and the first counts fetch both happen on the polling thread started
+        // below, which is what lets the panel appear immediately instead of
+        // waiting out a request.
 
         g_threadRunning = true;
         threadCreate(&g_pollThread, pollThreadFunc, nullptr, g_threadStack, sizeof(g_threadStack), 0x2C, -2);
