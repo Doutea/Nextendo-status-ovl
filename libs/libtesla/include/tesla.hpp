@@ -139,7 +139,7 @@ namespace tsl {
             constexpr Color ColorClickAnimation   = { 0x0, 0x2, 0x2, 0xF };   ///< Element click animation color
     // Light blue, for numeric values. Not part of upstream libtesla; added
     // here because the stock value colours are green and grey.
-    constexpr Color ColorValueBlue        = { 0x0, 0xA, 0xF, 0xF };
+    constexpr Color ColorValueBlue        = { 0x0, 0xD, 0xF, 0xF };
         }
     }
 
