@@ -91,20 +91,28 @@ void fetch_and_store() {
     Outcome result;
     result.attempted = true;
 
-    // EXPERIMENT (1.0.4): socketInitialize() is NOT called.
+    // The socket stack is brought up here.
     //
-    // The log proved this overlay's own code runs to completion - exitServices()
-    // prints both its enter and leave lines - so the crash happens after
-    // exitServices(), in the renderer teardown, the overlay's destructor, or the
-    // loader's next NRO load. socketInitialize() is the one heavy call left on
-    // the request path, and it is known to leave a stale "soc:" device behind
-    // whenever libnx's own init returns AlreadyInitialized. Removing it tells us
-    // whether the socket stack is what the loader trips over.
+    // libnx reports LibnxError_AlreadyInitialized, but that only means a "soc:"
+    // device is already registered in this process - it does not mean the stack
+    // is usable. This call is what the 1.0.0 build contained, and that is the
+    // build that displayed live counts; removing it (the 1.0.4 experiment)
+    // produced no data at all.
     //
-    // The `sm:` session is still held for the overlay's lifetime by
-    // NextendoOverlay::initServices(); that is what name resolution needs, so
-    // the numbers should still appear.
-    diag("fetch: no socket init");
+    // Buffer sizing, against libnx's own formula:
+    //     sb_efficiency * page_align(tcp_tx_max + tcp_rx_max + udp_tx + udp_rx)
+    //   defaults : ~2.20 MB, which exhausts the overlay heap;
+    //   tiny     : below libnx's documented minimum, so transfers stall;
+    //   these    : 2 * page_align(0x2000+0x10000+0x1000+0x4000) ~= 184 KB.
+    SocketInitConfig socket_config = *socketGetDefaultInitConfig();
+    socket_config.tcp_tx_buf_size = 0x2000;
+    socket_config.tcp_rx_buf_size = 0x4000;
+    socket_config.tcp_tx_buf_max_size = 0x2000;
+    socket_config.tcp_rx_buf_max_size = 0x10000;
+    socket_config.udp_tx_buf_size = 0x1000;
+    socket_config.udp_rx_buf_size = 0x4000;
+    socket_config.sb_efficiency = 2;
+    socketInitialize(&socket_config);
 
     // NOTE: no `sm:` session is opened here. It is held for the overlay's whole
     // lifetime by NextendoOverlay::initServices(), because that is the only
