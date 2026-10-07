@@ -239,7 +239,7 @@ std::string fetchUrl(const std::string& url, const std::string& host, const std:
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
     // One attempt's cap. fetchUrl() retries with a growing deadline,
     // so this is not the effective limit for the whole request.
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
@@ -290,6 +290,13 @@ std::string fetchCountsWithRetry(std::string& errorOut) {
     static const int kAttempts = 3;
 
     for (int attempt = 0; attempt < kAttempts; ++attempt) {
+        // Give up at once if the overlay is closing: exitServices() waits for
+        // this thread, and two more attempts could otherwise hold it for ~30s.
+        if (!g_threadRunning.load()) {
+            errorOut = "closing";
+            return std::string();
+        }
+
         std::string lastError;
         const std::string body = fetchOnlineCounts(lastError);
 
@@ -493,10 +500,9 @@ static std::atomic<bool> g_refreshRequested{false};
 static std::atomic<bool> g_refreshing{false};
 
 static void pollThreadFunc(void*) {
-    // The game-config download used to run in initServices(), which meant the
-    // panel could not be drawn until the request had finished. It only feeds the
-    // per-title detail view, so it happens here instead, off the critical path.
-    loadGamesConfig();
+    // No game-config download here any more. It fed the per-title detail view,
+    // which has no entry point since the panel was reworked, so the request was
+    // pure overhead: a GitHub fetch and an SD-card write on every open.
 
     while (g_threadRunning.load()) {
         const bool requested = g_refreshRequested.exchange(false);
