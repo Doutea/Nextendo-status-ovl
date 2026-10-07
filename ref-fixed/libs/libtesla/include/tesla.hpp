@@ -1588,7 +1588,7 @@ namespace tsl {
 
                 renderer->drawRect(15, tsl::cfg::FramebufferHeight - 73, tsl::cfg::FramebufferWidth - 30, 1, a(tsl::style::color::ColorText));
 
-                renderer->drawString("\uE0E1  Back     \uE0E0  OK", false, 30, 693, 23, a(tsl::style::color::ColorText));
+                renderer->drawString("\uE0E1  \u8fd4\u56de     \uE0E0  \u786e\u5b9a", false, 30, 693, 23, a(tsl::style::color::ColorText));
 
                 if (this->m_contentElement != nullptr)
                     this->m_contentElement->frame(renderer);
@@ -1682,7 +1682,7 @@ namespace tsl {
 
                 renderer->drawRect(15, tsl::cfg::FramebufferHeight - 73, tsl::cfg::FramebufferWidth - 30, 1, a(tsl::style::color::ColorText));
 
-                renderer->drawString("\uE0E1  Back     \uE0E0  OK", false, 30, 693, 23, a(tsl::style::color::ColorText));
+                renderer->drawString("\uE0E1  \u8fd4\u56de     \uE0E0  \u786e\u5b9a", false, 30, 693, 23, a(tsl::style::color::ColorText));
 
                 if (this->m_header != nullptr)
                     this->m_header->frame(renderer);
