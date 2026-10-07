@@ -17,6 +17,9 @@ fi
 export DEVKITA64="${DEVKITA64:-$DEVKITPRO/devkitA64}"
 export PATH="$DEVKITA64/bin:$DEVKITPRO/tools/bin:$PATH"
 
+# switchvars.sh does not export PORTLIBS, but the checks below need it.
+export PORTLIBS="${PORTLIBS:-$DEVKITPRO/portlibs/switch}"
+
 # jansson and mbedtls come from switch-portlibs.
 dkp-pacman -S --needed --noconfirm switch-dev switch-portlibs
 
