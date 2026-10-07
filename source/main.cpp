@@ -250,8 +250,8 @@ static std::string g_cachedIp;
 // written to the SD card and read back during initialisation. The panel then
 // opens with numbers already on it and the background refresh updates them.
 //
-// The same raw file API as timingLog() is used, because fopen() fails in an
-// overlay process.
+// The raw file API is used rather than fopen(), which fails in an overlay
+// process.
 // ---------------------------------------------------------------------------
 
 static const char* kCountsCachePath = "/switch/nextendo-status/last_counts.txt";
@@ -387,63 +387,6 @@ static void loadCountsCache() {
     }
 }
 
-// Timing log for the polling path.
-//
-// Appends lines to sdmc:/switch/nextendo-status/timing.log so the fetch path can
-// be measured on the console itself rather than inferred from a PC. The file API
-// is used directly: fopen() fails in an overlay process (errno 88, ENOSYS)
-// because fsdev has not been mounted for it.
-//
-// Diagnostic scaffolding for one round of measurements. Remove it, and the calls
-// to it, once the numbers are in.
-
-static Mutex g_logMutex;
-static bool g_logMutexReady = false;
-
-// Milliseconds elapsed since a tick captured earlier.
-static u64 msSince(u64 startTick) {
-    const u64 now = armGetSystemTick();
-    if (now <= startTick) return 0;
-    return armTicksToNs(now - startTick) / 1000000ULL;
-}
-
-static void timingLog(const std::string& line) {
-    if (!g_logMutexReady) {
-        mutexInit(&g_logMutex);
-        g_logMutexReady = true;
-    }
-    mutexLock(&g_logMutex);
-
-    FsFileSystem fs{};
-    if (R_SUCCEEDED(fsOpenSdCardFileSystem(&fs))) {
-        const char* path = "/switch/nextendo-status/timing.log";
-        // Create first so a missing file does not fail the open. Failure here is
-        // expected and ignored when the file already exists.
-        fsFsCreateFile(&fs, path, 0, 0);
-
-        FsFile file{};
-        if (R_SUCCEEDED(fsFsOpenFile(&fs, path,
-                                     FsOpenMode_Write | FsOpenMode_Append, &file))) {
-            s64 offset = 0;
-            fsFileGetSize(&file, &offset);
-            const std::string text = line + "\n";
-            fsFileWrite(&file, offset, text.data(), text.size(), FsWriteOption_Flush);
-            fsFileClose(&file);
-        }
-        fsFsClose(&fs);
-    }
-
-    mutexUnlock(&g_logMutex);
-}
-
-// Tick captured by the A handler and read by the thread, so the gap between the
-// key press and the thread noticing it can be reported.
-static std::atomic<u64> g_manualPressedTick{0};
-
-// Tick captured when the panel is first drawn, to time the first data arrival.
-static std::atomic<u64> g_firstDrawTick{0};
-static std::atomic<bool> g_firstDataLogged{false};
-
 std::string fetchUrl(const std::string& url, const std::string& host,
                      const std::vector<std::string>& fallbackIps, std::string& errorOut) {
     std::string responseBuffer;
@@ -456,11 +399,10 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    // Generous, because the first connection of a session has to complete a TLS
-    // handshake and the console is not fast. A shorter cap only produced
-    // timeouts that the next poll then resolved on its own.
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+    // Measured on the console, a successful request takes 4-6s, so this leaves
+    // room for a slow handshake without letting a dead network hold the thread.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -489,20 +431,7 @@ std::string fetchUrl(const std::string& url, const std::string& host,
 
     if (resolveList) curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
 
-    const u64 attemptStart = armGetSystemTick();
     const CURLcode res = curl_easy_perform(curl);
-
-    {
-        // Diagnostic: how long this attempt took, how it ended, and which
-        // address served it. The error text is what distinguishes a timeout
-        // from a failed name lookup.
-        char detail[200];
-        snprintf(detail, sizeof(detail), "  curl res=%d (%s) cachedIp=%s took=%llums",
-                 static_cast<int>(res), curl_easy_strerror(res),
-                 g_cachedIp.empty() ? "-" : g_cachedIp.c_str(),
-                 static_cast<unsigned long long>(msSince(attemptStart)));
-        timingLog(detail);
-    }
 
     if (res == CURLE_OK) {
         char* usedIp = nullptr;
@@ -763,18 +692,6 @@ static void pollThreadFunc(void*) {
         if (g_overlayVisible.load() || requested) {
             if (requested) g_refreshing = true;
 
-            const u64 pressedTick = g_manualPressedTick.exchange(0);
-            const u64 fetchStart = armGetSystemTick();
-            {
-                char detail[160];
-                snprintf(detail, sizeof(detail),
-                         "FETCH begin manual=%d visible=%d ackdelay=%llums",
-                         requested ? 1 : 0, g_overlayVisible.load() ? 1 : 0,
-                         static_cast<unsigned long long>(
-                             pressedTick ? msSince(pressedTick) : 0));
-                timingLog(detail);
-            }
-
             std::string error;
             std::string raw = fetchCountsWithRetry(error);
             auto newCounts = parseOnlineCounts(raw);
@@ -784,16 +701,6 @@ static void pollThreadFunc(void*) {
                 g_lastSuccessTick = armGetSystemTick();
                 // Persist immediately so the next open has something to show.
                 saveCountsCache(newJeux, g_lastSuccessTick.load());
-            }
-
-            {
-                char detail[200];
-                snprintf(detail, sizeof(detail),
-                         "FETCH end bytes=%zu games=%zu err=%s total=%llums",
-                         raw.size(), newJeux.size(),
-                         error.empty() ? "-" : error.c_str(),
-                         static_cast<unsigned long long>(msSince(fetchStart)));
-                timingLog(detail);
             }
 
             {
@@ -1035,7 +942,6 @@ public:
         m_totalItem = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         m_totalItem->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
-                g_manualPressedTick = armGetSystemTick();
                 g_refreshRequested = true;
                 // Raised here rather than in the thread: this runs on the frame
                 // the button was pressed, so the row reacts at once.
@@ -1114,7 +1020,6 @@ private:
         auto* total = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         total->setClickListener([](u64 keys) {
             if ((keys & HidNpadButton_A) != 0) {
-                g_manualPressedTick = armGetSystemTick();
                 g_refreshRequested = true;
                 // Raised here rather than in the thread: this runs on the frame
                 // the button was pressed, so the row reacts at once.
@@ -1184,17 +1089,9 @@ private:
         std::vector<JeuEntry> jeux = g_jeux;
         mutexUnlock(&g_mutex);
 
-        if (g_firstDrawTick.load() == 0) g_firstDrawTick = armGetSystemTick();
-
         const u64 lastTick = g_lastSuccessTick.load();
         const bool refreshing = g_refreshing.load();
 
-        if (lastTick != 0 && !g_firstDataLogged.exchange(true)) {
-            char detail[128];
-            snprintf(detail, sizeof(detail), "FIRST DATA shown %llums after first draw",
-                     static_cast<unsigned long long>(msSince(g_firstDrawTick.load())));
-            timingLog(detail);
-        }
         // Set by the A handler and cleared when the fetch finishes, so the row
         // responds on the frame the button was pressed rather than up to a
         // second later when the polling thread picks the request up.
