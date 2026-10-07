@@ -2306,7 +2306,9 @@ namespace tsl {
             bool m_trunctuated = false;
             bool m_faint = false;
             // Optional explicit colour for the value text; see setValueColor().
-            tsl::Color m_valueColor{};
+            // Color has no default constructor, so seed it with the stock
+            // highlight colour. It is only read when m_valueColorSet is true.
+            tsl::Color m_valueColor = tsl::style::color::ColorHighlight;
             bool m_valueColorSet = false;
 
             bool m_touched = false;
