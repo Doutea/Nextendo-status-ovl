@@ -137,6 +137,9 @@ namespace tsl {
             constexpr Color ColorDescription      = { 0xA, 0xA, 0xA, 0xF };   ///< Description text color
             constexpr Color ColorHeaderBar        = { 0xC, 0xC, 0xC, 0xF };   ///< Category header rectangle color
             constexpr Color ColorClickAnimation   = { 0x0, 0x2, 0x2, 0xF };   ///< Element click animation color
+    // Light blue, for numeric values. Not part of upstream libtesla; added
+    // here because the stock value colours are green and grey.
+    constexpr Color ColorValueBlue        = { 0x6, 0xC, 0xF, 0xF };
         }
     }
 
@@ -2190,7 +2193,12 @@ namespace tsl {
                     renderer->drawString(this->m_text.c_str(), false, this->getX() + 20, this->getY() + 45, 23, a(tsl::style::color::ColorText));
                 }
 
-                renderer->drawString(this->m_value.c_str(), false, this->getX() + this->m_maxWidth + 45, this->getY() + 45, 20, this->m_faint ? a(tsl::style::color::ColorDescription) : a(tsl::style::color::ColorHighlight));
+                const tsl::style::color::Color valueColor =
+                            this->m_valueColorSet
+                                ? this->m_valueColor
+                                : (this->m_faint ? tsl::style::color::ColorDescription
+                                                 : tsl::style::color::ColorHighlight);
+                    renderer->drawString(this->m_value.c_str(), false, this->getX() + this->m_maxWidth + 45, this->getY() + 45, 20, a(valueColor));
             }
 
             virtual void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
@@ -2256,6 +2264,14 @@ namespace tsl {
              * @param value Text
              * @param faint Should the text be drawn in a glowing green or a faint gray
              */
+            /**
+             * @brief Sets the colour of the value text explicitly
+             */
+            inline void setValueColor(tsl::style::color::Color color) {
+                this->m_valueColor = color;
+                this->m_valueColorSet = true;
+            }
+
             inline void setValue(const std::string& value, bool faint = false) {
                 this->m_value = value;
                 this->m_faint = faint;
@@ -2289,6 +2305,9 @@ namespace tsl {
             bool m_scroll = false;
             bool m_trunctuated = false;
             bool m_faint = false;
+            // Optional explicit colour for the value text; see setValueColor().
+            tsl::style::color::Color m_valueColor{};
+            bool m_valueColorSet = false;
 
             bool m_touched = false;
 
