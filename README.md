@@ -33,7 +33,7 @@ console's home screen — no need to open a browser or put the console down.
 
 | Button | Action |
 |--------|--------|
-| `A` | On **当前在线**: refresh now |
+| `A` | On **在线人数**: refresh now |
 | `B` | Close the overlay |
 | `D-Pad` / `Stick` | Move the selection |
 
@@ -46,7 +46,7 @@ Nextendo 网络
 当前在线           47     <- select and press A to refresh
 ─────────────────────────
 游戏 (12)                 <- number of titles currently being played
-  任天堂全明星大乱斗 特别版      30
+  任天堂全明星大乱斗           30
   马力欧赛车 8 豪华版          19
   超级马力欧制造 2             5
   我的世界：地牢 II            4
