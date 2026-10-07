@@ -1,10 +1,10 @@
 // Language diagnostic overlay.
 //
-// The main overlay's interface language is chosen from the console's system
-// language, and that check has been falling back to English. Rather than guess
+// The main overlay picks its interface language from the console's system
+// language, and that check kept falling back to English. Rather than guess
 // again, this reports the exact Result code of every call involved, on screen.
 //
-// Put it in sdmc:/switch/.overlays/ alongside the real overlay and read the
+// Copy it to sdmc:/switch/.overlays/ next to the real overlay and read the
 // values off the panel.
 
 #define TESLA_INIT_IMPL
@@ -14,6 +14,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// Visible to the extern "C" definition at the bottom of this file.
+bool g_chinese = false;
 
 namespace {
 
@@ -31,31 +34,46 @@ std::string hex(Result rc) {
 
 std::string code(u64 languageCode) {
     char buf[24];
-    std::snprintf(buf, sizeof(buf), "0x%llX", static_cast<unsigned long long>(languageCode));
+    std::snprintf(buf, sizeof(buf), "0x%llX",
+                  static_cast<unsigned long long>(languageCode));
     return buf;
 }
 
 std::string langName(SetLanguage language) {
     switch (language) {
-        case SetLanguage_ZHCN:    return "ZHCN";
-        case SetLanguage_ZHHANS:  return "ZHHANS";
-        case SetLanguage_ZHTW:    return "ZHTW";
-        case SetLanguage_ZHHANT:  return "ZHHANT";
-        case SetLanguage_ENUS:    return "ENUS";
-        case SetLanguage_ENGB:    return "ENGB";
-        case SetLanguage_JA:      return "JA";
-        case SetLanguage_KO:      return "KO";
-        case SetLanguage_FR:      return "FR";
-        case SetLanguage_DE:      return "DE";
-        case SetLanguage_ES:      return "ES";
-        default:                  return "other";
+        case SetLanguage_ZHCN:   return "ZHCN";
+        case SetLanguage_ZHHANS: return "ZHHANS";
+        case SetLanguage_ZHTW:   return "ZHTW";
+        case SetLanguage_ZHHANT: return "ZHHANT";
+        case SetLanguage_ENUS:   return "ENUS";
+        case SetLanguage_ENGB:   return "ENGB";
+        case SetLanguage_JA:     return "JA";
+        case SetLanguage_KO:     return "KO";
+        case SetLanguage_FR:     return "FR";
+        case SetLanguage_DE:     return "DE";
+        case SetLanguage_ES:     return "ES";
+        default:                 return "other";
+    }
+}
+
+bool isChinese(SetLanguage language) {
+    switch (language) {
+        case SetLanguage_ZHCN:
+        case SetLanguage_ZHHANS:
+        case SetLanguage_ZHTW:
+        case SetLanguage_ZHHANT:
+            return true;
+        default:
+            return false;
     }
 }
 
 std::vector<Row> probe() {
     std::vector<Row> rows;
+    bool chinese = false;
 
-    // 1. applet, which libnx initialises itself. This is the preferred source.
+    // 1. applet. libnx initialises this service itself, and its own source notes
+    //    this call is preferred over setGetLanguageCode.
     u64 appletCode = 0;
     const Result appletRc = appletGetDesiredLanguage(&appletCode);
     rows.push_back({"appletGetDesiredLanguage", hex(appletRc)});
@@ -64,10 +82,13 @@ std::vector<Row> probe() {
         SetLanguage language{};
         const Result made = setMakeLanguage(appletCode, &language);
         rows.push_back({"  setMakeLanguage", hex(made)});
-        rows.push_back({"  language", made == 0 ? langName(language) : "-"});
+        if (R_SUCCEEDED(made)) {
+            rows.push_back({"  language", langName(language)});
+            chinese = isChinese(language);
+        }
     }
 
-    // 2. set:, opened here because nothing else opens it for an overlay.
+    // 2. set:. Nothing else opens it for an overlay, so it is opened here.
     const Result openRc = setInitialize();
     rows.push_back({"setInitialize", hex(openRc)});
     if (R_SUCCEEDED(openRc)) {
@@ -79,28 +100,23 @@ std::vector<Row> probe() {
             SetLanguage language{};
             const Result made = setMakeLanguage(setCode, &language);
             rows.push_back({"  setMakeLanguage", hex(made)});
-            rows.push_back({"  language", made == 0 ? langName(language) : "-"});
+            if (R_SUCCEEDED(made)) {
+                rows.push_back({"  language", langName(language)});
+                chinese = chinese || isChinese(language);
+            }
         }
         setExit();
     }
 
-    g_probeChinese = chineseBySet || chineseByApplet;
-
     // 3. set:sys. It has no language getter at all, which is why using it for the
-    //    check was wrong; this just confirms the service opens.
+    //    check was wrong; this only confirms the service opens.
     const Result sysRc = setsysInitialize();
     rows.push_back({"setsysInitialize", hex(sysRc)});
     if (R_SUCCEEDED(sysRc)) setsysExit();
 
+    g_chinese = chinese;
+    rows.push_back({"VERDICT", chinese ? "Chinese" : "NOT Chinese"});
     return rows;
-}
-
-// Required by tesla.hpp, which needs a definition to link against. The probe
-// determines the language below and remembers it here.
-static bool g_probeChinese = false;
-
-extern "C" bool nextendoIsChinese() {
-    return g_probeChinese;
 }
 
 class ProbeGui : public tsl::Gui {
@@ -130,6 +146,12 @@ public:
 };
 
 }  // namespace
+
+// tesla.hpp declares this and uses it for the footer labels, so every overlay
+// must provide a definition.
+extern "C" bool nextendoIsChinese() {
+    return g_chinese;
+}
 
 int main(int argc, char** argv) {
     return tsl::loop<ProbeOverlay>(argc, argv);
