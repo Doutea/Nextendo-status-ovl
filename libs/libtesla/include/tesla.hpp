@@ -76,7 +76,12 @@ using namespace std::literals::chrono_literals;
 // Chosen by the overlay, which reads the console's system language.
 // Declared weak-looking but defined here so overlays without any language
 // support still link: they simply get the English labels.
-extern bool nextendoIsChinese();
+// Default returns false, so any overlay that does not define these still links
+// and simply gets the English labels. The overlay that does care replaces it:
+// its definition is strong, which overrides this weak one at link time.
+extern "C" [[gnu::weak]] bool nextendoIsChinese() {
+    return false;
+}
 [[maybe_unused]] static inline bool teslaFooterIsChinese() {
     return nextendoIsChinese();
 }
