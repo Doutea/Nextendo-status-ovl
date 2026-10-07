@@ -91,7 +91,7 @@ static const UiText kTitle       = {"Nextendo \u5728\u7ebf\u72b6\u6001", "Nexten
 static const UiText kLoading     = {"\u52a0\u8f7d\u4e2d\u2026", "\u2026"};
 static const UiText kSectionNow  = {"\u5f53\u524d\u72b6\u6001", "Current status"};
 static const UiText kPlayers     = {"\u5728\u7ebf\u4eba\u6570", "Players online"};
-static const UiText kGameCount   = {"\u6e38\u620f\u6570\u91cf", "Games played"};
+static const UiText kGameCount   = {"\u6e38\u620f\u5728\u7ebf", "Games online"};
 static const UiText kGameList    = {"\u6e38\u620f\u5217\u8868", "Game list"};
 static const UiText kRefreshing  = {"\u5237\u65b0\u4e2d\u2026", "Refreshing\u2026"};
 static const UiText kWaiting     = {"\u7b49\u5f85\u6570\u636e\u2026", "Waiting for data\u2026"};
@@ -811,9 +811,6 @@ public:
         m_sectionHeader = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(m_sectionHeader);
 
-        m_placeholder = new tsl::elm::ListItem(T(kWaiting));
-        list->addItem(m_placeholder);
-
         m_frame->setContent(list);
         m_list = list;
         refreshUI();
@@ -907,7 +904,6 @@ private:
 
         m_frame->setContent(list);
         m_list = list;
-        m_placeholder = nullptr;
         m_shownNames = names;
     }
 
@@ -978,7 +974,8 @@ private:
             m_gamesText = "--";
             if (m_totalItem != nullptr) m_totalItem->setValue(m_totalText, true);
             if (m_gamesItem != nullptr) m_gamesItem->setValue(m_gamesText, true);
-            if (m_placeholder != nullptr) m_placeholder->setValue(m_totalText, true);
+            // The game-list section stays empty here. It used to hold a row
+            // repeating the count row's "waiting" text, which read as clutter.
             return;
         }
 
@@ -1020,7 +1017,6 @@ private:
     tsl::elm::ListItem* m_totalItem = nullptr;
     tsl::elm::ListItem* m_gamesItem = nullptr;
     tsl::elm::CategoryHeader* m_sectionHeader = nullptr;
-    tsl::elm::ListItem* m_placeholder = nullptr;
     std::map<std::string, tsl::elm::ListItem*> m_rows;
     std::string m_totalText;
     std::string m_gamesText = "--";
