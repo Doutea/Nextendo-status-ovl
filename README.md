@@ -64,8 +64,6 @@
 
 3. 用快捷键呼出 overlay 菜单，选择 **Nextendo 在线状态**
 
-**默认快捷键**：`L + 下方向键 + 右摇杆按下`
-
 ## 使用提示
 
 - **第一次打开**会稍慢一点：需要联网取数。之后打开会立刻显示上次的人数，再自动更新。
@@ -128,8 +126,6 @@ Overlay).
    ```
 
 3. Open the overlay menu and choose **Nextendo Status**
-
-The default hotkey is `L + Down + R-Stick`.
 
 ## Notes
 
