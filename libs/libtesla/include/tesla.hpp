@@ -73,6 +73,19 @@
 using namespace std::literals::string_literals;
 using namespace std::literals::chrono_literals;
 
+// Chosen by the overlay, which reads the console's system language.
+// Declared weak-looking but defined here so overlays without any language
+// support still link: they simply get the English labels.
+extern bool nextendoIsChinese();
+[[maybe_unused]] static inline bool teslaFooterIsChinese() {
+    return nextendoIsChinese();
+}
+[[maybe_unused]] static inline const char* teslaFooterHints() {
+    return teslaFooterIsChinese()
+               ? "\uE0E1  \u8fd4\u56de     \uE0E0  \u786e\u5b9a"
+               : "\uE0E1  Back     \uE0E0  OK";
+}
+
 namespace tsl {
 
     // Constants
@@ -1588,7 +1601,7 @@ namespace tsl {
 
                 renderer->drawRect(15, tsl::cfg::FramebufferHeight - 73, tsl::cfg::FramebufferWidth - 30, 1, a(tsl::style::color::ColorText));
 
-                renderer->drawString("\uE0E1  \u8fd4\u56de     \uE0E0  \u786e\u5b9a", false, 30, 693, 23, a(tsl::style::color::ColorText));
+                renderer->drawString(teslaFooterHints(), false, 30, 693, 23, a(tsl::style::color::ColorText));
 
                 if (this->m_contentElement != nullptr)
                     this->m_contentElement->frame(renderer);
@@ -1682,7 +1695,7 @@ namespace tsl {
 
                 renderer->drawRect(15, tsl::cfg::FramebufferHeight - 73, tsl::cfg::FramebufferWidth - 30, 1, a(tsl::style::color::ColorText));
 
-                renderer->drawString("\uE0E1  \u8fd4\u56de     \uE0E0  \u786e\u5b9a", false, 30, 693, 23, a(tsl::style::color::ColorText));
+                renderer->drawString(teslaFooterHints(), false, 30, 693, 23, a(tsl::style::color::ColorText));
 
                 if (this->m_header != nullptr)
                     this->m_header->frame(renderer);
