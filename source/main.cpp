@@ -229,7 +229,18 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
 }
 
 // The address that last worked, reused so later requests skip the lookup.
-static std::string g_cachedIp;
+// Last address that worked, per host.
+//
+// A single global was wrong once a second host was fetched: the address that
+// served nextendo.network would be pinned for raw.githubusercontent.com too,
+// where it cannot work.
+static std::map<std::string, std::string> g_cachedIpByHost;
+// Entries fetched from the repository, layered over the compiled-in table.
+static std::map<std::string, std::string> g_namesZhOverride;
+static Mutex g_namesMutex;
+// When the last attempt was made, so a game that simply has no translation yet
+// does not cause a request on every poll.
+static std::atomic<u64> g_namesFetchedTick{0};
 
 // Fetches a URL, pinning the address curl connects to.
 //
@@ -409,22 +420,26 @@ std::string fetchUrl(const std::string& url, const std::string& host,
 
     struct curl_slist* resolveList = nullptr;
 
-    // Best candidate first: the address that served the last request.
-    if (!g_cachedIp.empty()) {
-        const std::string entry = host + ":443:" + g_cachedIp;
+    const std::string cachedIp = g_cachedIpByHost.count(host)
+                                     ? g_cachedIpByHost[host]
+                                     : std::string();
+
+    // Best candidate first: the address that last served this host.
+    if (!cachedIp.empty()) {
+        const std::string entry = host + ":443:" + cachedIp;
         resolveList = curl_slist_append(resolveList, entry.c_str());
     }
 
     // Then whatever libnx's resolver reports for the name.
     const std::string resolved = resolveHostToIp(host);
-    if (!resolved.empty() && resolved != g_cachedIp) {
+    if (!resolved.empty() && resolved != cachedIp) {
         const std::string entry = host + ":443:" + resolved;
         resolveList = curl_slist_append(resolveList, entry.c_str());
     }
 
     // Last resort: the addresses compiled in, for when the lookup itself fails.
     for (const auto& ip : fallbackIps) {
-        if (ip == g_cachedIp || ip == resolved) continue;
+        if (ip == cachedIp || ip == resolved) continue;
         const std::string entry = host + ":443:" + ip;
         resolveList = curl_slist_append(resolveList, entry.c_str());
     }
@@ -436,7 +451,7 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     if (res == CURLE_OK) {
         char* usedIp = nullptr;
         if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
-            g_cachedIp = usedIp;
+            g_cachedIpByHost[host] = usedIp;
         }
     }
 
@@ -681,6 +696,8 @@ static std::atomic<bool> g_refreshing{false};
 // look ignored.
 static std::atomic<bool> g_manualRefresh{false};
 
+static void maybeRefreshNames(const std::vector<JeuEntry>& jeux);
+
 static void pollThreadFunc(void*) {
     // No game-config download here any more. It fed the per-title detail view,
     // which has no entry point since the panel was reworked, so the request was
@@ -714,6 +731,10 @@ static void pollThreadFunc(void*) {
                 g_lastError = error;
                 mutexUnlock(&g_mutex);
             }
+
+            // A game with no translation is the signal to pull the current table
+            // from the repository.
+            maybeRefreshNames(newJeux);
 
             g_refreshing = false;
             g_manualRefresh = false;
@@ -897,6 +918,10 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
      "\u602A\u7269\u730E\u4EBA XX"},
     {"Pok\u00E9mon Violet",
      "\u5B9D\u53EF\u68A6 \u7D2B"},
+    {"Nintendo Switch Sports",
+     "Nintendo Switch \u8FD0\u52A8"},
+    {"Monopoly para Nintendo Switch",
+     "\u5730\u4EA7\u5927\u4EA8"},
 };
 
 // Chinese name when the console is set to Chinese, otherwise the API's own
@@ -904,9 +929,168 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
 // title on it would be both unreadable and wrong for that player's locale.
 static std::string localisedName(const std::string& apiName) {
     if (!nextendoIsChinese()) return apiName;
-    auto it = g_gameNamesZh.find(apiName);
-    return (it != g_gameNamesZh.end()) ? it->second : apiName;
+
+    // The fetched table wins, so an edit in the repository takes effect without
+    // a new build.
+    {
+        mutexLock(&g_namesMutex);
+        auto fetched = g_namesZhOverride.find(apiName);
+        if (fetched != g_namesZhOverride.end()) {
+            const std::string name = fetched->second;
+            mutexUnlock(&g_namesMutex);
+            return name;
+        }
+        mutexUnlock(&g_namesMutex);
+    }
+
+    auto builtin = g_gameNamesZh.find(apiName);
+    return (builtin != g_gameNamesZh.end()) ? builtin->second : apiName;
 }
+// ---------------------------------------------------------------------------
+// Chinese name table, updatable without a new release
+//
+// The table compiled into this file goes stale as soon as the API starts
+// reporting a game it does not know. docs/game-names-zh.txt in the project
+// repository is the live copy: when a game has no translation the overlay
+// fetches that file, caches it on the SD card and uses it from then on, so a new
+// game needs an edit in the repository rather than a new build.
+//
+// The compiled-in table remains the offline fallback, and a partial or malformed
+// response never replaces a working table.
+// ---------------------------------------------------------------------------
+
+static const std::string NAMES_ZH_URL =
+    "https://raw.githubusercontent.com/Doutea/Nextendo-status-ovl/main/docs/game-names-zh.txt";
+static const char* kNamesCachePath = "/switch/nextendo-status/names_zh.txt";
+
+static std::string trimSpaces(const std::string& text) {
+    const size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return std::string();
+    const size_t last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+// Parses the "English name | Chinese name" format, skipping '#' comments.
+static std::map<std::string, std::string> parseNamesTable(const std::string& text) {
+    std::map<std::string, std::string> table;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t eol = text.find('\n', pos);
+        const std::string line =
+            text.substr(pos, (eol == std::string::npos ? text.size() : eol) - pos);
+        pos = (eol == std::string::npos) ? text.size() + 1 : eol + 1;
+
+        const size_t first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+
+        const size_t bar = line.find('|', first);
+        if (bar == std::string::npos) continue;
+
+        const std::string key = trimSpaces(line.substr(first, bar - first));
+        const std::string value = trimSpaces(line.substr(bar + 1));
+        if (!key.empty() && !value.empty()) table[key] = value;
+    }
+    return table;
+}
+
+static void applyNamesTable(std::map<std::string, std::string> table) {
+    if (table.empty()) return;
+    mutexLock(&g_namesMutex);
+    g_namesZhOverride = std::move(table);
+    mutexUnlock(&g_namesMutex);
+}
+
+// Kept verbatim so the next run needs no network request.
+static void saveNamesCache(const std::string& text) {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    fsFsDeleteFile(&fs, kNamesCachePath);
+    if (R_SUCCEEDED(fsFsCreateFile(&fs, kNamesCachePath, text.size(), 0))) {
+        FsFile file{};
+        if (R_SUCCEEDED(fsFsOpenFile(&fs, kNamesCachePath, FsOpenMode_Write, &file))) {
+            fsFileWrite(&file, 0, text.data(), text.size(), FsWriteOption_Flush);
+            fsFileClose(&file);
+        }
+    }
+    fsFsClose(&fs);
+}
+
+// Read during initialisation, before the panel is built.
+static void loadNamesCache() {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    FsFile file{};
+    if (R_FAILED(fsFsOpenFile(&fs, kNamesCachePath, FsOpenMode_Read, &file))) {
+        fsFsClose(&fs);
+        return;
+    }
+
+    s64 size = 0;
+    fsFileGetSize(&file, &size);
+    if (size <= 0 || size > 512 * 1024) {
+        fsFileClose(&file);
+        fsFsClose(&fs);
+        return;
+    }
+
+    std::string content(static_cast<size_t>(size), '\0');
+    u64 bytesRead = 0;
+    const Result readResult = fsFileRead(&file, 0, content.data(), content.size(),
+                                         FsReadOption_None, &bytesRead);
+    fsFileClose(&file);
+    fsFsClose(&fs);
+    if (R_FAILED(readResult)) return;
+    content.resize(static_cast<size_t>(bytesRead));
+
+    applyNamesTable(parseNamesTable(content));
+}
+
+static void fetchNamesTable() {
+    // Recorded before the request so a failure still starts the cooldown.
+    g_namesFetchedTick = armGetSystemTick();
+
+    std::string error;
+    const std::string raw =
+        fetchUrl(NAMES_ZH_URL, "raw.githubusercontent.com", GITHUB_FALLBACK_IPS, error);
+    if (!error.empty() || raw.empty()) return;
+
+    auto parsed = parseNamesTable(raw);
+    if (parsed.empty()) return;
+
+    applyNamesTable(std::move(parsed));
+    saveNamesCache(raw);
+    g_dirty = true;   // redraw so the new names appear
+}
+
+// Called after a counts fetch. Only asks the repository for the table when some
+// game actually lacks a translation, and at most once per cooldown: the network
+// on this console is slow, and a game that has no translation yet must not cost
+// a request on every poll.
+static void maybeRefreshNames(const std::vector<JeuEntry>& jeux) {
+    if (!g_useChinese || jeux.empty()) return;
+
+    bool missing = false;
+    mutexLock(&g_namesMutex);
+    for (const auto& entry : jeux) {
+        if (g_namesZhOverride.count(entry.name) == 0 &&
+            g_gameNamesZh.count(entry.name) == 0) {
+            missing = true;
+            break;
+        }
+    }
+    mutexUnlock(&g_namesMutex);
+    if (!missing) return;
+
+    const u64 cooldownTicks = 19200000ULL * 60ULL * 30ULL;   // 30 minutes
+    const u64 last = g_namesFetchedTick.load();
+    const u64 now = armGetSystemTick();
+    if (last != 0 && now > last && (now - last) < cooldownTicks) return;
+
+    fetchNamesTable();
+}
+
 // Numeric values are shown in light blue, except zero, which is shown in
 // white so an empty game reads as inactive rather than as a live count.
 static void applyValueColour(tsl::elm::ListItem* item, const std::string& value) {
@@ -994,9 +1178,11 @@ private:
     // removed and tsl::elm::List offers no removal API. removeFocus() comes
     // first, as libtesla requires before items are destroyed.
     void rebuildGameRows(const std::vector<JeuEntry>& jeux) {
+        // The displayed names, not the API names: a translation that changed
+        // must count as a change so the rows are rebuilt with the new label.
         std::vector<std::string> names;
         names.reserve(jeux.size());
-        for (const auto& j : jeux) names.push_back(j.name);
+        for (const auto& j : jeux) names.push_back(localisedName(j.name));
 
         // Same games as before: refresh the numbers in place. That is the common
         // case and it leaves the selection alone.
@@ -1173,6 +1359,8 @@ public:
         // Put the last known numbers on screen straight away. A fetch on this
         // console can take 8-20s, so without this the panel sits empty.
         loadCountsCache();
+        // Same for the name table, so the cached translations are used offline.
+        loadNamesCache();
 
         mutexInit(&g_mutex);
 
