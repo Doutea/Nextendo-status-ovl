@@ -1013,6 +1013,10 @@ static void runNatDetection() {
     // --- mapping ----------------------------------------------------------
     // One socket, several distinct destinations. A NAT that reuses its mapping
     // reports the same source port to all of them.
+    // The responses also say which servers advertise OTHER-ADDRESS, which is what
+    // the filtering test needs; recording it here saves asking them all over
+    // again below.
+    std::vector<std::string> behaviourTargets;
     StunSocket probe;
     if (probe.open()) {
         std::vector<std::string> destinations;
@@ -1026,11 +1030,13 @@ static void runNatDetection() {
 
             StunAttributes attributes;
             std::string source;
-            if (!probe.query(address, kStunServers[i].port, 0, 2500, attributes, source))
+            if (!probe.query(address, kStunServers[i].port, 0, 1500, attributes, source))
                 continue;
 
             destinations.push_back(address);
             mappedPorts.push_back(portPart(attributes.mapped));
+            if (!attributes.other.empty())
+                behaviourTargets.push_back(address + ":" + std::to_string(kStunServers[i].port));
             if (result.publicIp.empty()) {
                 result.publicIp = addressPart(attributes.mapped);
                 result.udpWorking = true;
@@ -1060,7 +1066,7 @@ static void runNatDetection() {
                 if (address.empty()) continue;
                 StunAttributes attributes;
                 std::string source;
-                if (s.query(address, kStunServers[k].port, 0, 2000, attributes, source)) {
+                if (s.query(address, kStunServers[k].port, 0, 1500, attributes, source)) {
                     pairs.emplace_back(s.localPort, portPart(attributes.mapped));
                     break;
                 }
@@ -1082,55 +1088,41 @@ static void runNatDetection() {
         int honouredBoth = 0;
         int honouredPort = 0;
 
-        for (int i = 0; i < kStunServerCount; ++i) {
-            if (honouredBoth > 0 || (usable >= 3 && honouredPort > 0)) break;
+        // Only the servers that advertised OTHER-ADDRESS above are asked. The
+        // timeout is short because a filtered reply never arrives at all, so
+        // waiting longer only makes the panel slow to fill in. Two servers are
+        // enough to separate the cone types.
+        for (const auto& target : behaviourTargets) {
+            if (honouredBoth > 0) break;
+            if (usable >= 2 && honouredPort > 0) break;
+            if (usable >= 3) break;
 
-            const std::string address = stunServerAddress(kStunServers[i]);
-            if (address.empty()) continue;
-            const u16 port = kStunServers[i].port;
-
-            StunSocket s;
-            if (!s.open()) continue;
-
-            StunAttributes base;
-            std::string source;
-            const bool answered = s.query(address, port, 0, 2000, base, source);
-            // No OTHER-ADDRESS means no RFC 5780 behaviour test.
-            const bool capable = answered && !base.other.empty();
-            s.close();
-            if (!capable) continue;
+            const std::string address = addressPart(target);
+            const u16 port = portPart(target);
             ++usable;
 
-            // change IP and port: a reply means endpoint-independent filtering.
-            {
-                StunSocket t;
-                if (t.open()) {
-                    StunAttributes attributes;
-                    std::string src;
-                    if (t.query(address, port, 0x00000006, 2500, attributes, src) &&
-                        addressPart(src) != address) {
-                        ++honouredBoth;
-                    }
-                    t.close();
-                }
-            }
-            if (honouredBoth > 0) break;
+            StunSocket t;
+            if (!t.open()) continue;
 
-            // change port only: a reply from the same address on another port
-            // means address-dependent filtering.
-            {
-                StunSocket t;
-                if (t.open()) {
-                    StunAttributes attributes;
-                    std::string src;
-                    if (t.query(address, port, 0x00000004, 2500, attributes, src) &&
-                        (addressPart(src) != address || portPart(src) != port)) {
-                        if (addressPart(src) != address) ++honouredBoth;
-                        else ++honouredPort;
-                    }
-                    t.close();
-                }
+            StunAttributes attributes;
+            std::string src;
+
+            // change IP and port: a reply means endpoint-independent filtering.
+            if (t.query(address, port, 0x00000006, 1200, attributes, src) &&
+                addressPart(src) != address) {
+                ++honouredBoth;
+                t.close();
+                break;
             }
+
+            // change port only: a reply from another port, or from another
+            // address, means the filtering is not address-and-port dependent.
+            if (t.query(address, port, 0x00000004, 1200, attributes, src) &&
+                (addressPart(src) != address || portPart(src) != port)) {
+                if (addressPart(src) != address) ++honouredBoth;
+                else ++honouredPort;
+            }
+            t.close();
         }
 
         if (honouredBoth > 0) {
@@ -1978,17 +1970,7 @@ public:
         });
         list->addItem(m_totalItem);
 
-        // Network environment. Pressing A opens the detail screen; the test
-        // itself runs on its own thread so the panel never waits for it.
-        m_natItem = new tsl::elm::ListItem(T(kNatLabel), natSummaryText());
-        m_natItem->setClickListener([](u64 keys) {
-            if ((keys & HidNpadButton_A) != 0) {
-                tsl::changeTo<NatDetailGui>();
-                return true;
-            }
-            return false;
-        });
-        list->addItem(m_natItem);
+        addNatRow(list);
 
 
         // The list itself. This heading also separates the two blocks.
@@ -2075,17 +2057,7 @@ private:
         list->addItem(total);
         m_totalItem = total;
 
-        // Network environment. Pressing A opens the detail screen; the test
-        // itself runs on its own thread so the panel never waits for it.
-        m_natItem = new tsl::elm::ListItem(T(kNatLabel), natSummaryText());
-        m_natItem->setClickListener([](u64 keys) {
-            if ((keys & HidNpadButton_A) != 0) {
-                tsl::changeTo<NatDetailGui>();
-                return true;
-            }
-            return false;
-        });
-        list->addItem(m_natItem);
+        addNatRow(list);
 
 
         auto* section = new tsl::elm::CategoryHeader(T(kGameList));
@@ -2139,6 +2111,29 @@ private:
         return buf;
     }
 
+    // The NAT row is built in two places - the first build and every rebuild of
+    // the game list - so it is made here, which keeps the value and its colour
+    // together. Only applying the colour in one of those places is what made the
+    // row fall back to the default colour after the first rebuild.
+    void addNatRow(tsl::elm::List* list) {
+        m_natItem = new tsl::elm::ListItem(T(kNatLabel), natSummaryText());
+        m_natItem->setClickListener([](u64 keys) {
+            if ((keys & HidNpadButton_A) != 0) {
+                tsl::changeTo<NatDetailGui>();
+                return true;
+            }
+            return false;
+        });
+        refreshNatRow();
+        list->addItem(m_natItem);
+    }
+
+    void refreshNatRow() {
+        if (m_natItem == nullptr) return;
+        m_natItem->setValue(natSummaryText());
+        m_natItem->setValueColor(natSummaryColour());
+    }
+
     void refreshUI() {
         mutexLock(&g_mutex);
         const std::string errCopy = g_lastError;
@@ -2164,10 +2159,7 @@ private:
 
         // The NAT row, refreshed before the early return below so it still
         // updates when no player counts have arrived yet.
-        if (m_natItem != nullptr) {
-            m_natItem->setValue(natSummaryText());
-            m_natItem->setValueColor(natSummaryColour());
-        }
+        refreshNatRow();
 
         if (!haveData) {
             if (refreshing) {
