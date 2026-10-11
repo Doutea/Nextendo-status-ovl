@@ -548,6 +548,9 @@ static std::atomic<bool> g_natTesting{false};
 static std::atomic<bool> g_natDirty{false};
 static std::atomic<bool> g_natThreadRunning{false};
 static Thread g_natThread;
+// The detection thread performs DNS and socket work, so it needs the same
+// headroom as the polling thread.
+alignas(0x1000) static u8 g_natThreadStack[0x40000];
 static std::atomic<u64> g_natTestedSeconds{0};
 
 static const char* kNatCachePath = "/switch/nextendo-status/nat.txt";
@@ -634,7 +637,7 @@ static const char* natTypeText(NatType type) {
 static tsl::Color natTypeColour(NatType type) {
     switch (type) {
         case NatType::A: return tsl::style::color::ColorGreen;
-        case NatType::B: return tsl::style::color::ColorBlue;
+        case NatType::B: return tsl::style::color::ColorLightGreen;
         case NatType::C: return tsl::style::color::ColorAmber;
         case NatType::D: return tsl::style::color::ColorOrange;
         case NatType::F: return tsl::style::color::ColorRed;
