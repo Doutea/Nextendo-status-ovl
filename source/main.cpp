@@ -100,38 +100,30 @@ static const UiText kGameList    = {"\u6e38\u620f\u5217\u8868", "Game list"};
 static const UiText kRefreshing  = {"\u5237\u65b0\u4e2d\u2026", "Refreshing\u2026"};
 static const UiText kWaiting     = {"\u7b49\u5f85\u6570\u636e\u2026", "Waiting for data\u2026"};
 static const UiText kUpdatedAt   = {"\u66f4\u65b0\u4e8e ", "Updated "};
-static const UiText kNatLabel    = {"\u7F51\u7EDC\u73AF\u5883", "Network"};
-static const UiText kNatTitle    = {"\u7F51\u7EDC\u73AF\u5883", "Network"};
-static const UiText kNatSubtitle = {"\u8FDE\u63A5\u4E0E NAT", "link and NAT"};
-static const UiText kNatTesting  = {"\u68C0\u6D4B\u4E2D\u2026", "Testing\u2026"};
-static const UiText kNatUntested = {"\u672A\u68C0\u6D4B", "Not tested"};
-static const UiText kNatRetest   = {"\u91CD\u65B0\u68C0\u6D4B", "Test again"};
-static const UiText kNatResult   = {"\u68C0\u6D4B\u7ED3\u679C", "Result"};
-static const UiText kNatGrade    = {"NAT \u7C7B\u578B", "NAT type"};
-static const UiText kNatMapping  = {"\u6620\u5C04\u884C\u4E3A", "Mapping"};
-static const UiText kNatPort     = {"\u7AEF\u53E3\u4FDD\u6301", "Port preserved"};
-static const UiText kNatCgnat    = {"\u8FD0\u8425\u5546 NAT", "Carrier NAT"};
-static const UiText kNatPublic   = {"\u516C\u7F51\u5730\u5740", "Public address"};
-static const UiText kNatLocal    = {"\u672C\u5730\u7F51\u7EDC", "Local network"};
-static const UiText kNatLocalIp  = {"\u672C\u5730\u5730\u5740", "Local address"};
-static const UiText kNatSubnet   = {"\u5B50\u7F51\u63A9\u7801", "Subnet mask"};
-static const UiText kNatGateway  = {"\u7F51\u5173", "Gateway"};
-static const UiText kNatDns      = {"DNS", "DNS"};
-static const UiText kNatLink     = {"\u8FDE\u63A5\u65B9\u5F0F", "Link"};
-static const UiText kNatWired    = {"\u6709\u7EBF", "Ethernet"};
-static const UiText kNatWifi     = {"Wi-Fi", "Wi-Fi"};
-static const UiText kNatUnknown  = {"\u672A\u77E5", "Unknown"};
-static const UiText kNatYes      = {"\u662F", "Yes"};
-static const UiText kNatNo       = {"\u5426", "No"};
-static const UiText kNatGood     = {"\u826F\u597D", "Good"};
-static const UiText kNatPoor     = {"\u4E00\u822C", "Fair"};
-static const UiText kNatBad      = {"\u8F83\u5DEE", "Poor"};
-static const UiText kNatFailing  = {"\u4E0D\u53EF\u7528", "Unavailable"};
-static const UiText kNatEi       = {"\u7AEF\u70B9\u65E0\u5173", "Endpoint-independent"};
-static const UiText kNatAd       = {"\u5730\u5740\u76F8\u5173", "Address-dependent"};
-static const UiText kNatApd      = {"\u5730\u5740\u7AEF\u53E3\u76F8\u5173", "Address-and-port-dependent"};
-static const UiText kNatFilter      = {"\u8FC7\u6EE4\u884C\u4E3A", "Filtering"};
-static const UiText kNatNotMeasured = {"\u672A\u6D4B\u5B9A", "Not measured"};
+static const UiText kNatLabel     = {"\u7F51\u7EDC\u73AF\u5883", "Network"};
+static const UiText kNatTitle     = {"\u7F51\u7EDC\u73AF\u5883", "Network"};
+static const UiText kNatSubtitle  = {"\u8FDE\u63A5\u4E0E NAT", "link and NAT"};
+static const UiText kNatTesting   = {"\u68C0\u6D4B\u4E2D\u2026", "Testing\u2026"};
+static const UiText kNatUntested  = {"\u672A\u68C0\u6D4B", "Not tested"};
+static const UiText kNatRetest    = {"\u91CD\u65B0\u68C0\u6D4B", "Test again"};
+static const UiText kNatResult    = {"\u68C0\u6D4B\u7ED3\u679C", "Result"};
+static const UiText kNatType      = {"NAT \u7C7B\u578B", "NAT type"};
+static const UiText kNatPeer      = {"\u5BF9\u7B49\u7F51\u7EDC", "Peer to peer"};
+static const UiText kNatMapping   = {"\u6620\u5C04\u884C\u4E3A", "Mapping"};
+static const UiText kNatPublic    = {"\u516C\u7F51\u5730\u5740", "Public address"};
+static const UiText kNatUnknown   = {"\u672A\u77E5", "Unknown"};
+static const UiText kNatTypeA     = {"\u7C7B\u578B A", "Type A"};
+static const UiText kNatTypeB     = {"\u7C7B\u578B B", "Type B"};
+static const UiText kNatTypeC     = {"\u7C7B\u578B C", "Type C"};
+static const UiText kNatTypeD     = {"\u7C7B\u578B D", "Type D"};
+static const UiText kNatTypeF     = {"\u7C7B\u578B F", "Type F"};
+static const UiText kNatExcellent = {"\u6781\u4F73", "Excellent"};
+static const UiText kNatGood      = {"\u826F\u597D", "Good"};
+static const UiText kNatFair      = {"\u4E00\u822C", "Fair"};
+static const UiText kNatPoor      = {"\u8F83\u5DEE", "Poor"};
+static const UiText kNatBlocked   = {"\u5DF2\u963B\u65AD", "Blocked"};
+static const UiText kNatEi        = {"\u7AEF\u70B9\u65E0\u5173", "Endpoint-independent"};
+static const UiText kNatApd       = {"\u5730\u5740\u7AEF\u53E3\u76F8\u5173", "Address-and-port-dependent"};
 
 static const char* T(const UiText& text) {
     return g_useChinese ? text.zh : text.en;
@@ -510,48 +502,43 @@ std::string fetchOnlineCounts(std::string& errorOut) {
 // ---------------------------------------------------------------------------
 // NAT environment detection
 //
-// The console's own "NAT type" is worked out by Nintendo's conntest servers and
-// is not exposed to homebrew - libnx has no API for it at all - and this overlay
-// is used on a private server anyway. What matters in practice is whether the
-// network lets two players reach each other, so the behaviour is measured
-// directly instead.
+// Reports the same A/B/C/D/F classification the console's own connection test
+// uses, derived from the RFC 4787 behaviour of the network rather than from
+// Nintendo (libnx exposes no NAT type, and this overlay is used on a private
+// server anyway).
 //
-// Nintendo's A/B/C/D labels are the RFC 4787 mapping and filtering combinations:
-//
-//   A  mapping endpoint-independent, filtering endpoint-independent or
-//      address-dependent
+//   A  mapping endpoint-independent, and either endpoint-independent or
+//      address-dependent filtering
 //   B  mapping endpoint-independent, filtering address-and-port-dependent
-//   C  mapping not endpoint-independent, but the port is predictable
-//   D  everything else
-//   F  no UDP at all
+//   C  mapping not endpoint-independent, but the mapped port is predictable
+//   D  any other mapping
+//   F  UDP does not work at all
 //
-// The mapping half is measured with STUN, and C is inferred from how predictable
-// the mapped port is. The filtering half needs a server that replies from a
-// different address, which no public STUN server does (28 were tried), so A and
-// B cannot be told apart here and are reported together.
+// The mapping half comes from asking several STUN servers, from one local port,
+// what source port they see. The filtering half needs a server that re-sends its
+// reply from a different address, so only servers that advertise OTHER-ADDRESS
+// are used - that attribute is what proves a server implements RFC 5780. A reply
+// only counts as evidence when it arrives from an address other than the one the
+// request went to, because a server that merely ignores CHANGE-REQUEST still
+// answers, from the original address.
 // ---------------------------------------------------------------------------
 
-enum class NatMapping { Unknown, EndpointIndependent, AddressDependent, AddressPortDependent };
-enum class NatGrade { Unknown, Good, Poor, Bad, Failing };
+enum class NatMapping { Unknown, EndpointIndependent, AddressPortDependent };
+// Filtering behaviour, which is what separates the cone types.
+enum class NatFiltering { Unknown, EndpointIndependent, AddressDependent, AddressPortDependent };
+enum class NatType { Unknown, A, B, C, D, F };
+enum class NatQuality { Unknown, Excellent, Good, Fair, Poor };
+enum class NatPeer { Unknown, Excellent, Fair, Poor, Blocked };
 
 struct NatStatus {
     bool tested = false;
     bool udpWorking = false;
-    NatGrade grade = NatGrade::Unknown;
+    NatType type = NatType::Unknown;
+    NatQuality quality = NatQuality::Unknown;
+    NatPeer peer = NatPeer::Unknown;
     NatMapping mapping = NatMapping::Unknown;
-    bool portPreserved = false;
-    bool portPredictable = false;
-    bool cgnat = false;
-    bool cgnatKnown = false;
+    NatFiltering filtering = NatFiltering::Unknown;
     std::string publicIp;
-    int publicPort = 0;
-    std::string localIp;
-    std::string subnetMask;
-    std::string gateway;
-    std::string dns;
-    bool linkKnown = false;
-    bool wired = false;
-    int wifiStrength = 0;
 };
 
 static NatStatus g_nat;
@@ -561,41 +548,42 @@ static std::atomic<bool> g_natTesting{false};
 static std::atomic<bool> g_natDirty{false};
 static std::atomic<bool> g_natThreadRunning{false};
 static Thread g_natThread;
-// The detection thread does DNS and socket work, so it needs the same headroom
-// as the polling thread.
-alignas(0x1000) static u8 g_natThreadStack[0x40000];
-// When the cached result was produced, so a stale one can be re-tested.
 static std::atomic<u64> g_natTestedSeconds{0};
 
 static const char* kNatCachePath = "/switch/nextendo-status/nat.txt";
 
-// Addresses that answered when this was written. DNS is tried first, but this
-// console's resolver is unreliable, so a fallback keeps the test working.
 struct StunServer {
     const char* host;
     u16 port;
     const char* ipFallback;
 };
 
+// Every entry resolves to its own address: the mapping test compares one
+// destination against another, so two names sharing an address would be useless.
+// These are also the servers that advertise OTHER-ADDRESS, verified when this
+// was written, which the filtering test depends on.
 static const StunServer kStunServers[] = {
-    // One entry per distinct address: two hostnames that share one address would
-    // make the mapping test compare a destination with itself.
+    {"stun.miwifi.com", 3478, "111.206.174.2"},
+    {"stun.dus.net", 3478, "83.125.8.45"},
+    {"stun.pure-ip.com", 3478, "34.195.177.19"},
+    {"stun.tel.lu", 3478, "116.79.127.49"},
+    {"stun.vo.lu", 3478, "116.79.127.49"},
+    {"stun.siptrunk.com", 3478, "23.140.243.250"},
+    {"stun.voipxs.nl", 3478, "122.197.160.201"},
+    {"stun.nextcloud.com", 3478, "46.225.95.169"},
     {"stun.l.google.com", 19302, "74.125.250.129"},
     {"stun.cloudflare.com", 3478, "162.159.207.0"},
-    {"stun.miwifi.com", 3478, "111.206.174.2"},
-    {"stun.hot-chilli.net", 3478, "144.76.136.87"},
-    {"stun.nextcloud.com", 3478, "46.225.95.169"},
-    {"stun.telnyx.com", 3478, "192.76.120.66"},
-    {"stun.dus.net", 3478, "83.125.8.45"},
-    {"stun.sipthor.net", 3478, "108.163.134.186"},
 };
 static const int kStunServerCount = static_cast<int>(sizeof(kStunServers) / sizeof(kStunServers[0]));
 
 static const u32 kStunMagic = 0x2112A442u;
 static const u16 kStunBindingRequest = 0x0001;
 static const u16 kStunBindingResponse = 0x0101;
-static const u16 kStunAttrXorMapped = 0x0020;
+static const u16 kStunAttrChangeRequest = 0x0003;
 static const u16 kStunAttrMapped = 0x0001;
+static const u16 kStunAttrXorMapped = 0x0020;
+static const u16 kStunAttrResponseOrigin = 0x802B;
+static const u16 kStunAttrOtherAddress = 0x802C;
 
 static u64 uptimeMs() {
     return armTicksToNs(armGetSystemTick()) / 1000000ULL;
@@ -605,9 +593,6 @@ static u64 uptimeSeconds() {
     return armTicksToNs(armGetSystemTick()) / 1000000000ULL;
 }
 
-// RFC 1918, RFC 6598 and the other ranges that mean "not reachable from the
-// internet". Seeing one of these as the public address is the clearest sign that
-// peer-to-peer hosting will not work.
 static bool isPrivateOrCgnat(const std::string& ip) {
     unsigned a = 0, b = 0, c = 0, d = 0;
     if (sscanf(ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return false;
@@ -631,7 +616,101 @@ static std::string ipv4ToString(u32 address) {
 }
 
 // ---------------------------------------------------------------------------
-// Cache, so the panel shows the last result immediately and offline.
+// Presentation: the strings and colours the two screens use.
+// ---------------------------------------------------------------------------
+
+static const char* natTypeText(NatType type) {
+    switch (type) {
+        case NatType::A: return T(kNatTypeA);
+        case NatType::B: return T(kNatTypeB);
+        case NatType::C: return T(kNatTypeC);
+        case NatType::D: return T(kNatTypeD);
+        case NatType::F: return T(kNatTypeF);
+        default:         return T(kNatUnknown);
+    }
+}
+
+// Colours follow the reference table: green, blue, amber, orange, red.
+static tsl::Color natTypeColour(NatType type) {
+    switch (type) {
+        case NatType::A: return tsl::style::color::ColorGreen;
+        case NatType::B: return tsl::style::color::ColorBlue;
+        case NatType::C: return tsl::style::color::ColorAmber;
+        case NatType::D: return tsl::style::color::ColorOrange;
+        case NatType::F: return tsl::style::color::ColorRed;
+        default:         return tsl::style::color::ColorText;
+    }
+}
+
+static const char* natQualityText(NatQuality quality) {
+    switch (quality) {
+        case NatQuality::Excellent: return T(kNatExcellent);
+        case NatQuality::Good:      return T(kNatGood);
+        case NatQuality::Fair:      return T(kNatFair);
+        case NatQuality::Poor:      return T(kNatPoor);
+        default:                    return T(kNatUnknown);
+    }
+}
+
+static const char* natPeerText(NatPeer peer) {
+    switch (peer) {
+        case NatPeer::Excellent: return T(kNatExcellent);
+        case NatPeer::Fair:      return T(kNatFair);
+        case NatPeer::Poor:      return T(kNatPoor);
+        case NatPeer::Blocked:   return T(kNatBlocked);
+        default:                 return T(kNatUnknown);
+    }
+}
+
+static const char* natMappingText(NatMapping mapping) {
+    switch (mapping) {
+        case NatMapping::EndpointIndependent:  return T(kNatEi);
+        case NatMapping::AddressPortDependent: return T(kNatApd);
+        default:                               return T(kNatUnknown);
+    }
+}
+
+// Value and colour for the panel's summary row.
+static std::string natSummaryText() {
+    if (g_natTesting.load()) return T(kNatTesting);
+
+    NatQuality quality = NatQuality::Unknown;
+    bool tested = false;
+    {
+        mutexLock(&g_natMutex);
+        tested = g_nat.tested;
+        quality = g_nat.quality;
+        mutexUnlock(&g_natMutex);
+    }
+    if (!tested) return T(kNatUntested);
+    return natQualityText(quality);
+}
+
+static tsl::Color natSummaryColour() {
+    NatType type = NatType::Unknown;
+    {
+        mutexLock(&g_natMutex);
+        type = g_nat.type;
+        mutexUnlock(&g_natMutex);
+    }
+    return natTypeColour(type);
+}
+
+static std::string natPublicAddress() {
+    std::string ip;
+    bool tested = false;
+    {
+        mutexLock(&g_natMutex);
+        ip = g_nat.publicIp;
+        tested = g_nat.tested;
+        mutexUnlock(&g_natMutex);
+    }
+    if (!tested || ip.empty()) return T(kNatUnknown);
+    return ip;
+}
+
+// ---------------------------------------------------------------------------
+// Cache
 // ---------------------------------------------------------------------------
 
 static void saveNatCache(const NatStatus& status) {
@@ -639,21 +718,12 @@ static void saveNatCache(const NatStatus& status) {
     text += "tested=" + std::to_string(status.tested ? 1 : 0) + "\n";
     text += "at=" + std::to_string(uptimeSeconds()) + "\n";
     text += "udp=" + std::to_string(status.udpWorking ? 1 : 0) + "\n";
-    text += "grade=" + std::to_string(static_cast<int>(status.grade)) + "\n";
+    text += "type=" + std::to_string(static_cast<int>(status.type)) + "\n";
+    text += "quality=" + std::to_string(static_cast<int>(status.quality)) + "\n";
+    text += "peer=" + std::to_string(static_cast<int>(status.peer)) + "\n";
     text += "mapping=" + std::to_string(static_cast<int>(status.mapping)) + "\n";
-    text += "portpreserved=" + std::to_string(status.portPreserved ? 1 : 0) + "\n";
-    text += "portpredictable=" + std::to_string(status.portPredictable ? 1 : 0) + "\n";
-    text += "cgnat=" + std::to_string(status.cgnat ? 1 : 0) + "\n";
-    text += "cgnatknown=" + std::to_string(status.cgnatKnown ? 1 : 0) + "\n";
+    text += "filtering=" + std::to_string(static_cast<int>(status.filtering)) + "\n";
     text += "publicip=" + cacheEscape(status.publicIp) + "\n";
-    text += "publicport=" + std::to_string(status.publicPort) + "\n";
-    text += "localip=" + cacheEscape(status.localIp) + "\n";
-    text += "subnet=" + cacheEscape(status.subnetMask) + "\n";
-    text += "gateway=" + cacheEscape(status.gateway) + "\n";
-    text += "dns=" + cacheEscape(status.dns) + "\n";
-    text += "linkknown=" + std::to_string(status.linkKnown ? 1 : 0) + "\n";
-    text += "wired=" + std::to_string(status.wired ? 1 : 0) + "\n";
-    text += "wifi=" + std::to_string(status.wifiStrength) + "\n";
 
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
@@ -710,24 +780,15 @@ static void loadNatCache() {
         const std::string key = line.substr(0, eq);
         const std::string value = cacheUnescape(line.substr(eq + 1));
 
-        if (key == "tested")         loaded.tested = (value == "1");
-        else if (key == "at")        g_natTestedSeconds = strtoull(value.c_str(), nullptr, 10);
-        else if (key == "udp")       loaded.udpWorking = (value == "1");
-        else if (key == "grade")     loaded.grade = static_cast<NatGrade>(atoi(value.c_str()));
-        else if (key == "mapping")   loaded.mapping = static_cast<NatMapping>(atoi(value.c_str()));
-        else if (key == "portpreserved")   loaded.portPreserved = (value == "1");
-        else if (key == "portpredictable") loaded.portPredictable = (value == "1");
-        else if (key == "cgnat")     loaded.cgnat = (value == "1");
-        else if (key == "cgnatknown") loaded.cgnatKnown = (value == "1");
-        else if (key == "publicip")  loaded.publicIp = value;
-        else if (key == "publicport") loaded.publicPort = atoi(value.c_str());
-        else if (key == "localip")   loaded.localIp = value;
-        else if (key == "subnet")    loaded.subnetMask = value;
-        else if (key == "gateway")   loaded.gateway = value;
-        else if (key == "dns")       loaded.dns = value;
-        else if (key == "linkknown") loaded.linkKnown = (value == "1");
-        else if (key == "wired")     loaded.wired = (value == "1");
-        else if (key == "wifi")      loaded.wifiStrength = atoi(value.c_str());
+        if (key == "tested")        loaded.tested = (value == "1");
+        else if (key == "at")       g_natTestedSeconds = strtoull(value.c_str(), nullptr, 10);
+        else if (key == "udp")      loaded.udpWorking = (value == "1");
+        else if (key == "type")     loaded.type = static_cast<NatType>(atoi(value.c_str()));
+        else if (key == "quality")  loaded.quality = static_cast<NatQuality>(atoi(value.c_str()));
+        else if (key == "peer")     loaded.peer = static_cast<NatPeer>(atoi(value.c_str()));
+        else if (key == "mapping")  loaded.mapping = static_cast<NatMapping>(atoi(value.c_str()));
+        else if (key == "filtering") loaded.filtering = static_cast<NatFiltering>(atoi(value.c_str()));
+        else if (key == "publicip") loaded.publicIp = value;
     }
 
     if (!loaded.tested) return;
@@ -740,7 +801,7 @@ static void loadNatCache() {
 // STUN
 // ---------------------------------------------------------------------------
 
-static size_t stunBuildRequest(u8* out) {
+static size_t stunBuildRequest(u8* out, u32 changeFlags) {
     u8 txn[12];
     const u64 r1 = randomGet64();
     const u64 r2 = randomGet64();
@@ -748,58 +809,84 @@ static size_t stunBuildRequest(u8* out) {
     memcpy(txn + 8, &r2, 4);
 
     size_t pos = 0;
+    const u16 attrLen = changeFlags ? 8 : 0;
     out[pos++] = static_cast<u8>(kStunBindingRequest >> 8);
     out[pos++] = static_cast<u8>(kStunBindingRequest & 0xFF);
-    out[pos++] = 0x00;               // no attributes
-    out[pos++] = 0x00;
+    out[pos++] = static_cast<u8>(attrLen >> 8);
+    out[pos++] = static_cast<u8>(attrLen & 0xFF);
     out[pos++] = 0x21; out[pos++] = 0x12; out[pos++] = 0xA4; out[pos++] = 0x42;
     memcpy(out + pos, txn, sizeof(txn));
-    return pos + sizeof(txn);
+    pos += sizeof(txn);
+    if (changeFlags) {
+        out[pos++] = 0x00; out[pos++] = 0x03;
+        out[pos++] = 0x00; out[pos++] = 0x04;
+        out[pos++] = static_cast<u8>((changeFlags >> 24) & 0xFF);
+        out[pos++] = static_cast<u8>((changeFlags >> 16) & 0xFF);
+        out[pos++] = static_cast<u8>((changeFlags >> 8) & 0xFF);
+        out[pos++] = static_cast<u8>(changeFlags & 0xFF);
+    }
+    return pos;
 }
 
-static bool stunParseMapped(const u8* data, size_t len, std::string& ipOut, u16& portOut) {
+struct StunAttributes {
+    std::string mapped;      // the address the server sees
+    std::string other;       // the server's alternate address, if it has one
+    std::string origin;      // the address this reply came from
+};
+
+// MAPPED-ADDRESS format is plain; XOR-MAPPED-ADDRESS is XORed with the magic
+// cookie. RESPONSE-ORIGIN and OTHER-ADDRESS use the plain form.
+static std::string stunAddress(const u8* value, u16 length, bool xored) {
+    if (length < 8 || value[1] != 0x01) return std::string();
+    u16 port = static_cast<u16>((value[2] << 8) | value[3]);
+    u32 addr = (static_cast<u32>(value[4]) << 24) | (static_cast<u32>(value[5]) << 16) |
+               (static_cast<u32>(value[6]) << 8) | static_cast<u32>(value[7]);
+    if (xored) {
+        port ^= static_cast<u16>(kStunMagic >> 16);
+        addr ^= kStunMagic;
+    }
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u:%u",
+             static_cast<unsigned>((addr >> 24) & 0xFF),
+             static_cast<unsigned>((addr >> 16) & 0xFF),
+             static_cast<unsigned>((addr >> 8) & 0xFF),
+             static_cast<unsigned>(addr & 0xFF),
+             static_cast<unsigned>(port));
+    return buf;
+}
+
+static bool stunParse(const u8* data, size_t len, StunAttributes& out) {
     if (len < 20) return false;
     const u16 msgType = static_cast<u16>((data[0] << 8) | data[1]);
     const u16 attrLen = static_cast<u16>((data[2] << 8) | data[3]);
     if (msgType != kStunBindingResponse) return false;
     if (data[4] != 0x21 || data[5] != 0x12 || data[6] != 0xA4 || data[7] != 0x42) return false;
 
+    bool sawMapped = false;
     size_t pos = 20;
     const size_t end = 20 + attrLen;
     while (pos + 4 <= len && pos + 4 <= end) {
         const u16 type = static_cast<u16>((data[pos] << 8) | data[pos + 1]);
         const u16 alen = static_cast<u16>((data[pos + 2] << 8) | data[pos + 3]);
-        const size_t valuePos = pos + 4;
-        if (valuePos + alen > len) break;
+        const u8* value = data + pos + 4;
+        if (pos + 4 + alen > len) break;
 
-        if ((type == kStunAttrXorMapped || type == kStunAttrMapped) && alen >= 8 &&
-            data[valuePos + 1] == 0x01) {
-            u16 port = static_cast<u16>((data[valuePos + 2] << 8) | data[valuePos + 3]);
-            u32 addr = (static_cast<u32>(data[valuePos + 4]) << 24) |
-                       (static_cast<u32>(data[valuePos + 5]) << 16) |
-                       (static_cast<u32>(data[valuePos + 6]) << 8) |
-                       static_cast<u32>(data[valuePos + 7]);
-            if (type == kStunAttrXorMapped) {
-                port ^= static_cast<u16>(kStunMagic >> 16);
-                addr ^= kStunMagic;
-            }
-            char buf[20];
-            snprintf(buf, sizeof(buf), "%u.%u.%u.%u",
-                     static_cast<unsigned>((addr >> 24) & 0xFF),
-                     static_cast<unsigned>((addr >> 16) & 0xFF),
-                     static_cast<unsigned>((addr >> 8) & 0xFF),
-                     static_cast<unsigned>(addr & 0xFF));
-            ipOut = buf;
-            portOut = port;
-            return true;
+        if (type == kStunAttrXorMapped) {
+            out.mapped = stunAddress(value, alen, true);
+            sawMapped = true;
+        } else if (type == kStunAttrMapped) {
+            out.mapped = stunAddress(value, alen, false);
+            sawMapped = true;
+        } else if (type == kStunAttrOtherAddress) {
+            out.other = stunAddress(value, alen, false);
+        } else if (type == kStunAttrResponseOrigin) {
+            out.origin = stunAddress(value, alen, false);
         }
-        pos = valuePos + alen + ((4 - (alen % 4)) % 4);
+        pos += 4 + alen + ((4 - (alen % 4)) % 4);
     }
-    return false;
+    return sawMapped;
 }
 
-// One UDP socket, so several queries can come from the same local port. That is
-// what makes the mapping test meaningful.
 struct StunSocket {
     int fd = -1;
     u16 localPort = 0;
@@ -830,8 +917,10 @@ struct StunSocket {
         fd = -1;
     }
 
-    bool query(const std::string& ip, u16 port, int timeoutMs,
-               std::string& mappedIp, u16& mappedPort) {
+    // Sends one request and waits for the first binding response. The reply's
+    // source is reported too, because the filtering test needs it.
+    bool query(const std::string& ip, u16 port, u32 changeFlags, int timeoutMs,
+               StunAttributes& out, std::string& sourceAddress) {
         if (fd < 0) return false;
 
         sockaddr_in to{};
@@ -840,7 +929,7 @@ struct StunSocket {
         to.sin_addr.s_addr = inet_addr(ip.c_str());
 
         u8 request[32];
-        const size_t requestLen = stunBuildRequest(request);
+        const size_t requestLen = stunBuildRequest(request, changeFlags);
         if (::sendto(fd, request, requestLen, 0,
                      reinterpret_cast<sockaddr*>(&to), sizeof(to)) < 0)
             return false;
@@ -853,10 +942,17 @@ struct StunSocket {
             if (::poll(&pfd, 1, 200) <= 0) continue;
 
             u8 response[512];
-            const int n = ::recv(fd, response, sizeof(response), 0);
+            sockaddr_in from{};
+            socklen_t fromLen = sizeof(from);
+            const int n = ::recvfrom(fd, response, sizeof(response), 0,
+                                     reinterpret_cast<sockaddr*>(&from), &fromLen);
             if (n <= 0) continue;
-            if (stunParseMapped(response, static_cast<size_t>(n), mappedIp, mappedPort))
-                return true;
+            if (!stunParse(response, static_cast<size_t>(n), out)) continue;
+
+            char src[32] = {0};
+            inet_ntop(AF_INET, &from.sin_addr, src, sizeof(src));
+            sourceAddress = std::string(src) + ":" + std::to_string(ntohs(from.sin_port));
+            return true;
         }
         return false;
     }
@@ -868,26 +964,12 @@ static std::string stunServerAddress(const StunServer& server) {
     return server.ipFallback;
 }
 
-static void readLocalNetwork(NatStatus& out) {
+static void readLocalIp(std::string& out) {
     u32 address = 0, mask = 0, gateway = 0, dns1 = 0, dns2 = 0;
-    if (R_SUCCEEDED(nifmGetCurrentIpConfigInfo(&address, &mask, &gateway, &dns1, &dns2))) {
-        out.localIp = ipv4ToString(address);
-        out.subnetMask = ipv4ToString(mask);
-        out.gateway = ipv4ToString(gateway);
-        out.dns = ipv4ToString(dns1);
-    }
-
-    NifmInternetConnectionType type{};
-    u32 strength = 0;
-    NifmInternetConnectionStatus status{};
-    if (R_SUCCEEDED(nifmGetInternetConnectionStatus(&type, &strength, &status))) {
-        out.linkKnown = true;
-        out.wired = (type == NifmInternetConnectionType_Ethernet);
-        out.wifiStrength = static_cast<int>(strength);
-    }
+    if (R_SUCCEEDED(nifmGetCurrentIpConfigInfo(&address, &mask, &gateway, &dns1, &dns2)))
+        out = ipv4ToString(address);
 }
 
-// The public address, asked of a plain HTTP echo if STUN gave nothing.
 static std::string publicIpOverHttp() {
     std::string error;
     const std::string body = fetchUrl("http://checkip.amazonaws.com", "checkip.amazonaws.com",
@@ -904,68 +986,68 @@ static std::string publicIpOverHttp() {
     return ip;
 }
 
+// Filters a "ip:port" down to "ip".
+static std::string addressPart(const std::string& address) {
+    const size_t colon = address.find(':');
+    return colon == std::string::npos ? address : address.substr(0, colon);
+}
+
+static u16 portPart(const std::string& address) {
+    const size_t colon = address.find(':');
+    if (colon == std::string::npos) return 0;
+    return static_cast<u16>(atoi(address.c_str() + colon + 1));
+}
+
+// ---------------------------------------------------------------------------
+// The behaviour test
+// ---------------------------------------------------------------------------
+
 static void runNatDetection() {
     NatStatus result;
-    readLocalNetwork(result);
+    std::string localIp;
+    readLocalIp(localIp);
 
-    // Mapping behaviour: one socket, several servers. An endpoint-independent NAT
-    // reuses the same mapping, so every server reports the same port.
+    // --- mapping ----------------------------------------------------------
+    // One socket, several distinct destinations. A NAT that reuses its mapping
+    // reports the same source port to all of them.
     StunSocket probe;
     if (probe.open()) {
         std::vector<std::string> destinations;
-        std::vector<std::string> mappedIps;
         std::vector<u16> mappedPorts;
 
         for (int i = 0; i < kStunServerCount && destinations.size() < 3; ++i) {
             const std::string address = stunServerAddress(kStunServers[i]);
             if (address.empty()) continue;
-
-            // Compare only distinct destinations. A NAT whose mapping depends on
-            // the destination still reuses one mapping per destination address,
-            // so probing one address repeatedly would look endpoint-independent
-            // when it is not.
-            if (std::find(destinations.begin(), destinations.end(), address) !=
-                destinations.end())
+            if (std::find(destinations.begin(), destinations.end(), address) != destinations.end())
                 continue;
 
-            std::string mappedIp;
-            u16 mappedPort = 0;
-            if (!probe.query(address, kStunServers[i].port, 2500, mappedIp, mappedPort))
+            StunAttributes attributes;
+            std::string source;
+            if (!probe.query(address, kStunServers[i].port, 0, 2500, attributes, source))
                 continue;
 
             destinations.push_back(address);
-            mappedIps.push_back(mappedIp);
-            mappedPorts.push_back(mappedPort);
-
+            mappedPorts.push_back(portPart(attributes.mapped));
             if (result.publicIp.empty()) {
-                result.publicIp = mappedIp;
-                result.publicPort = mappedPort;
+                result.publicIp = addressPart(attributes.mapped);
                 result.udpWorking = true;
             }
         }
 
-        // Two distinct destinations are the minimum that can say anything about
-        // the mapping; with one, the result is left unknown rather than guessed.
+        // Two distinct destinations are the minimum that can say anything; with
+        // one, the answer is left unknown rather than guessed.
         if (destinations.size() >= 2) {
             const bool samePort = std::all_of(mappedPorts.begin(), mappedPorts.end(),
                                               [&](u16 p) { return p == mappedPorts[0]; });
-            const bool sameAddress = std::all_of(
-                mappedIps.begin(), mappedIps.end(),
-                [&](const std::string& ip) { return ip == mappedIps[0]; });
-            if (sameAddress) {
-                result.mapping = samePort ? NatMapping::EndpointIndependent
-                                          : NatMapping::AddressPortDependent;
-            }
+            result.mapping = samePort ? NatMapping::EndpointIndependent
+                                      : NatMapping::AddressPortDependent;
         }
-        if (!mappedPorts.empty())
-            result.portPreserved = (mappedPorts[0] == probe.localPort);
     }
     probe.close();
 
-    // Port predictability is what separates Nintendo's C from D: from several
-    // local ports, do the mapped ports move in step with them?
-    if (result.mapping != NatMapping::EndpointIndependent &&
-        result.mapping != NatMapping::Unknown) {
+    // --- port predictability, which separates C from D --------------------
+    bool portPredictable = false;
+    if (result.mapping == NatMapping::AddressPortDependent) {
         std::vector<std::pair<u16, u16>> pairs;
         for (int i = 0; i < 3; ++i) {
             StunSocket s;
@@ -973,10 +1055,10 @@ static void runNatDetection() {
             for (int k = 0; k < kStunServerCount; ++k) {
                 const std::string address = stunServerAddress(kStunServers[k]);
                 if (address.empty()) continue;
-                std::string mappedIp;
-                u16 mappedPort = 0;
-                if (s.query(address, kStunServers[k].port, 2000, mappedIp, mappedPort)) {
-                    pairs.emplace_back(s.localPort, mappedPort);
+                StunAttributes attributes;
+                std::string source;
+                if (s.query(address, kStunServers[k].port, 0, 2000, attributes, source)) {
+                    pairs.emplace_back(s.localPort, portPart(attributes.mapped));
                     break;
                 }
             }
@@ -985,30 +1067,134 @@ static void runNatDetection() {
         if (pairs.size() >= 2) {
             const int localDelta = static_cast<int>(pairs[1].first) - static_cast<int>(pairs[0].first);
             const int mappedDelta = static_cast<int>(pairs[1].second) - static_cast<int>(pairs[0].second);
-            result.portPredictable = (localDelta != 0) && (localDelta == mappedDelta);
+            portPredictable = (localDelta != 0) && (localDelta == mappedDelta);
         }
     }
 
-    // Without STUN the public address can still come from HTTP, which is enough
-    // to spot carrier-grade NAT.
-    if (result.publicIp.empty()) {
-        result.publicIp = publicIpOverHttp();
-        if (!result.publicIp.empty()) result.publicPort = 0;
-    }
-    if (!result.publicIp.empty()) {
-        result.cgnatKnown = true;
-        result.cgnat = isPrivateOrCgnat(result.publicIp);
+    // --- filtering --------------------------------------------------------
+    // Only servers that advertise OTHER-ADDRESS are asked, and a reply only
+    // counts when it comes from somewhere other than where the request went.
+    if (result.mapping == NatMapping::EndpointIndependent) {
+        int usable = 0;
+        int honouredBoth = 0;
+        int honouredPort = 0;
+
+        for (int i = 0; i < kStunServerCount; ++i) {
+            if (honouredBoth > 0 || (usable >= 3 && honouredPort > 0)) break;
+
+            const std::string address = stunServerAddress(kStunServers[i]);
+            if (address.empty()) continue;
+            const u16 port = kStunServers[i].port;
+
+            StunSocket s;
+            if (!s.open()) continue;
+
+            StunAttributes base;
+            std::string source;
+            const bool answered = s.query(address, port, 0, 2000, base, source);
+            // No OTHER-ADDRESS means no RFC 5780 behaviour test.
+            const bool capable = answered && !base.other.empty();
+            s.close();
+            if (!capable) continue;
+            ++usable;
+
+            // change IP and port: a reply means endpoint-independent filtering.
+            {
+                StunSocket t;
+                if (t.open()) {
+                    StunAttributes attributes;
+                    std::string src;
+                    if (t.query(address, port, 0x00000006, 2500, attributes, src) &&
+                        addressPart(src) != address) {
+                        ++honouredBoth;
+                    }
+                    t.close();
+                }
+            }
+            if (honouredBoth > 0) break;
+
+            // change port only: a reply from the same address on another port
+            // means address-dependent filtering.
+            {
+                StunSocket t;
+                if (t.open()) {
+                    StunAttributes attributes;
+                    std::string src;
+                    if (t.query(address, port, 0x00000004, 2500, attributes, src) &&
+                        (addressPart(src) != address || portPart(src) != port)) {
+                        if (addressPart(src) != address) ++honouredBoth;
+                        else ++honouredPort;
+                    }
+                    t.close();
+                }
+            }
+        }
+
+        if (honouredBoth > 0) {
+            result.filtering = NatFiltering::EndpointIndependent;
+        } else if (honouredPort > 0) {
+            result.filtering = NatFiltering::AddressDependent;
+        } else if (usable > 0) {
+            result.filtering = NatFiltering::AddressPortDependent;
+        }
     }
 
-    // Grading, as far as Nintendo's definitions can be measured here.
+    // --- public address fallback, and carrier NAT ------------------------
+    if (result.publicIp.empty()) {
+        result.publicIp = publicIpOverHttp();
+    }
+    const bool cgnat = !result.publicIp.empty() && isPrivateOrCgnat(result.publicIp);
+
+    // --- the address the internet sees is the console's own: no NAT -------
+    const bool openNetwork = !result.publicIp.empty() && !localIp.empty() &&
+                             result.publicIp == localIp && !isPrivateOrCgnat(result.publicIp);
+
+    // --- classification --------------------------------------------------
     if (!result.udpWorking) {
-        result.grade = result.publicIp.empty() ? NatGrade::Failing : NatGrade::Unknown;
-    } else if (result.mapping == NatMapping::EndpointIndependent) {
-        result.grade = result.cgnat ? NatGrade::Bad : NatGrade::Good;
+        result.type = result.publicIp.empty() ? NatType::F : NatType::Unknown;
+        result.quality = NatQuality::Poor;
+        result.peer = NatPeer::Blocked;
+    } else if (openNetwork) {
+        result.type = NatType::A;
+        result.quality = NatQuality::Excellent;
+        result.peer = NatPeer::Excellent;
+    } else if (result.mapping == NatMapping::AddressPortDependent) {
+        result.type = portPredictable ? NatType::C : NatType::D;
+        result.quality = NatQuality::Poor;
+        result.peer = NatPeer::Blocked;
     } else if (result.mapping == NatMapping::Unknown) {
-        result.grade = NatGrade::Unknown;
+        // Only one destination answered, so nothing can be concluded.
+        result.type = NatType::Unknown;
+        result.quality = NatQuality::Unknown;
+        result.peer = NatPeer::Unknown;
     } else {
-        result.grade = result.portPredictable ? NatGrade::Poor : NatGrade::Bad;
+        switch (result.filtering) {
+            case NatFiltering::EndpointIndependent:
+                result.type = NatType::A;
+                result.quality = NatQuality::Excellent;
+                result.peer = NatPeer::Excellent;
+                break;
+            case NatFiltering::AddressDependent:
+                result.type = NatType::A;
+                result.quality = NatQuality::Good;
+                result.peer = NatPeer::Fair;
+                break;
+            default:
+                // Port-restricted: also the answer when no server could drive
+                // the test, which is the common case and the safe assumption.
+                result.type = NatType::B;
+                result.quality = NatQuality::Fair;
+                result.peer = NatPeer::Poor;
+                break;
+        }
+    }
+
+    // A carrier NAT maps endpoint-independently but cannot be reached from
+    // outside at all, which is the worse problem, so it wins.
+    if (cgnat) {
+        result.type = NatType::D;
+        result.quality = NatQuality::Poor;
+        result.peer = NatPeer::Blocked;
     }
 
     result.tested = true;
@@ -1026,35 +1212,12 @@ static void natThreadFunc(void*) {
     while (g_natThreadRunning.load()) {
         if (g_natRequested.exchange(false)) {
             g_natTesting = true;
-            g_natDirty = true;              // show "testing" at once
+            g_natDirty = true;
             runNatDetection();
             g_natTesting = false;
             g_natDirty = true;
         }
         svcSleepThread(200'000'000LL);
-    }
-}
-
-// Short label for the panel row.
-static std::string natSummaryText() {
-    if (g_natTesting.load()) return T(kNatTesting);
-
-    NatGrade grade = NatGrade::Unknown;
-    bool tested = false;
-    {
-        mutexLock(&g_natMutex);
-        tested = g_nat.tested;
-        grade = g_nat.grade;
-        mutexUnlock(&g_natMutex);
-    }
-    if (!tested) return T(kNatUntested);
-
-    switch (grade) {
-        case NatGrade::Good:    return T(kNatGood);
-        case NatGrade::Poor:    return T(kNatPoor);
-        case NatGrade::Bad:     return T(kNatBad);
-        case NatGrade::Failing: return T(kNatFailing);
-        default:                return T(kNatUnknown);
     }
 }
 
@@ -1688,8 +1851,8 @@ static void applyValueColour(tsl::elm::ListItem* item, const std::string& value)
                                : tsl::style::color::ColorValueBlue);
 }
 
-// The NAT detail screen: one row per measurement, plus a row that re-runs the
-// test. B goes back, which libtesla handles for any Gui that does not consume it.
+// The NAT detail screen. The type is tinted the way the reference table tints
+// it, so the colour alone carries the meaning.
 class NatDetailGui : public tsl::Gui {
 public:
     virtual tsl::elm::Element* createUI() override {
@@ -1707,30 +1870,14 @@ public:
         list->addItem(m_retestItem);
 
         list->addItem(new tsl::elm::CategoryHeader(T(kNatResult)));
-        m_gradeItem = new tsl::elm::ListItem(T(kNatGrade));
-        list->addItem(m_gradeItem);
+        m_typeItem = new tsl::elm::ListItem(T(kNatType));
+        list->addItem(m_typeItem);
+        m_peerItem = new tsl::elm::ListItem(T(kNatPeer));
+        list->addItem(m_peerItem);
         m_mappingItem = new tsl::elm::ListItem(T(kNatMapping));
         list->addItem(m_mappingItem);
-        m_portItem = new tsl::elm::ListItem(T(kNatPort));
-        list->addItem(m_portItem);
-        m_filterItem = new tsl::elm::ListItem(T(kNatFilter));
-        list->addItem(m_filterItem);
-        m_cgnatItem = new tsl::elm::ListItem(T(kNatCgnat));
-        list->addItem(m_cgnatItem);
         m_publicItem = new tsl::elm::ListItem(T(kNatPublic));
         list->addItem(m_publicItem);
-
-        list->addItem(new tsl::elm::CategoryHeader(T(kNatLocal)));
-        m_localIpItem = new tsl::elm::ListItem(T(kNatLocalIp));
-        list->addItem(m_localIpItem);
-        m_subnetItem = new tsl::elm::ListItem(T(kNatSubnet));
-        list->addItem(m_subnetItem);
-        m_gatewayItem = new tsl::elm::ListItem(T(kNatGateway));
-        list->addItem(m_gatewayItem);
-        m_dnsItem = new tsl::elm::ListItem(T(kNatDns));
-        list->addItem(m_dnsItem);
-        m_linkItem = new tsl::elm::ListItem(T(kNatLink));
-        list->addItem(m_linkItem);
 
         m_frame->setContent(list);
         refresh();
@@ -1744,25 +1891,6 @@ public:
     }
 
 private:
-    static const char* mappingText(NatMapping mapping) {
-        switch (mapping) {
-            case NatMapping::EndpointIndependent:   return T(kNatEi);
-            case NatMapping::AddressDependent:      return T(kNatAd);
-            case NatMapping::AddressPortDependent:  return T(kNatApd);
-            default:                                return T(kNatUnknown);
-        }
-    }
-
-    static const char* gradeText(NatGrade grade) {
-        switch (grade) {
-            case NatGrade::Good:    return T(kNatGood);
-            case NatGrade::Poor:    return T(kNatPoor);
-            case NatGrade::Bad:     return T(kNatBad);
-            case NatGrade::Failing: return T(kNatFailing);
-            default:                return T(kNatUnknown);
-        }
-    }
-
     void setValue(tsl::elm::ListItem* item, const std::string& value, bool faint) {
         if (item != nullptr) item->setValue(value, faint);
     }
@@ -1778,76 +1906,38 @@ private:
 
         if (testing) {
             m_frame->setSubtitle(T(kNatTesting));
-        } else if (snapshot.tested) {
-            m_frame->setSubtitle(T(kNatSubtitle));
         } else {
-            m_frame->setSubtitle(T(kNatUntested));
+            m_frame->setSubtitle(snapshot.tested ? T(kNatSubtitle) : T(kNatUntested));
         }
-
         if (m_retestItem != nullptr)
             m_retestItem->setValue(testing ? T(kNatTesting) : "", true);
 
         if (!snapshot.tested) {
-            setValue(m_gradeItem, T(kNatUnknown), true);
+            setValue(m_typeItem, T(kNatUnknown), true);
+            setValue(m_peerItem, T(kNatUnknown), true);
             setValue(m_mappingItem, T(kNatUnknown), true);
-            setValue(m_portItem, T(kNatUnknown), true);
-            setValue(m_filterItem, T(kNatUnknown), true);
-            setValue(m_cgnatItem, T(kNatUnknown), true);
             setValue(m_publicItem, T(kNatUnknown), true);
-        } else {
-            setValue(m_gradeItem, gradeText(snapshot.grade), false);
-            setValue(m_mappingItem, mappingText(snapshot.mapping), false);
-            setValue(m_portItem, snapshot.portPreserved ? T(kNatYes) : T(kNatNo), false);
-            // Stated plainly: no public STUN server can drive the filtering
-            // test, so the cone subtype is genuinely unknown.
-            setValue(m_filterItem, T(kNatNotMeasured), true);
-
-            if (!snapshot.cgnatKnown) {
-                setValue(m_cgnatItem, T(kNatUnknown), true);
-            } else {
-                setValue(m_cgnatItem, snapshot.cgnat ? T(kNatYes) : T(kNatNo), false);
-            }
-
-            if (snapshot.publicIp.empty()) {
-                setValue(m_publicItem, T(kNatUnknown), true);
-            } else if (snapshot.publicPort > 0) {
-                setValue(m_publicItem,
-                         snapshot.publicIp + ":" + std::to_string(snapshot.publicPort), false);
-            } else {
-                setValue(m_publicItem, snapshot.publicIp, false);
-            }
+            return;
         }
 
-        // The local half is read from nifm and is available even before a test.
-        setValue(m_localIpItem, snapshot.localIp.empty() ? T(kNatUnknown) : snapshot.localIp, false);
-        setValue(m_subnetItem, snapshot.subnetMask.empty() ? T(kNatUnknown) : snapshot.subnetMask, false);
-        setValue(m_gatewayItem, snapshot.gateway.empty() ? T(kNatUnknown) : snapshot.gateway, false);
-        setValue(m_dnsItem, snapshot.dns.empty() ? T(kNatUnknown) : snapshot.dns, false);
-
-        if (!snapshot.linkKnown) {
-            setValue(m_linkItem, T(kNatUnknown), true);
-        } else if (snapshot.wired) {
-            setValue(m_linkItem, T(kNatWired), false);
-        } else {
-            setValue(m_linkItem,
-                     std::string(T(kNatWifi)) + " " + std::to_string(snapshot.wifiStrength) + "/3",
-                     false);
+        if (m_typeItem != nullptr) {
+            m_typeItem->setValue(natTypeText(snapshot.type));
+            m_typeItem->setValueColor(natTypeColour(snapshot.type));
         }
+        setValue(m_peerItem, natPeerText(snapshot.peer), false);
+        setValue(m_mappingItem, natMappingText(snapshot.mapping), false);
+        // Address only: the translated port belongs to this session and would
+        // read as something worth keeping.
+        setValue(m_publicItem, snapshot.publicIp.empty() ? T(kNatUnknown) : snapshot.publicIp,
+                 snapshot.publicIp.empty());
     }
 
     tsl::elm::OverlayFrame* m_frame = nullptr;
     tsl::elm::ListItem* m_retestItem = nullptr;
-    tsl::elm::ListItem* m_gradeItem = nullptr;
+    tsl::elm::ListItem* m_typeItem = nullptr;
+    tsl::elm::ListItem* m_peerItem = nullptr;
     tsl::elm::ListItem* m_mappingItem = nullptr;
-    tsl::elm::ListItem* m_portItem = nullptr;
-    tsl::elm::ListItem* m_filterItem = nullptr;
-    tsl::elm::ListItem* m_cgnatItem = nullptr;
     tsl::elm::ListItem* m_publicItem = nullptr;
-    tsl::elm::ListItem* m_localIpItem = nullptr;
-    tsl::elm::ListItem* m_subnetItem = nullptr;
-    tsl::elm::ListItem* m_gatewayItem = nullptr;
-    tsl::elm::ListItem* m_dnsItem = nullptr;
-    tsl::elm::ListItem* m_linkItem = nullptr;
 };
 
 class GuiTest : public tsl::Gui {
@@ -2067,6 +2157,13 @@ private:
             m_frame->setSubtitle(line.c_str());
         } else {
             m_frame->setSubtitle(refreshing ? T(kLoading) : T(kWaiting));
+        }
+
+        // The NAT row, refreshed before the early return below so it still
+        // updates when no player counts have arrived yet.
+        if (m_natItem != nullptr) {
+            m_natItem->setValue(natSummaryText());
+            m_natItem->setValueColor(natSummaryColour());
         }
 
         if (!haveData) {
