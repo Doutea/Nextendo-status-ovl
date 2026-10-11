@@ -144,6 +144,13 @@ namespace tsl {
     // Light blue, for numeric values. Not part of upstream libtesla; added
     // here because the stock value colours are green and grey.
     constexpr Color ColorValueBlue        = { 0x0, 0xD, 0xF, 0xF };
+    // Tints for the NAT type, matching the reference table's colours. Lightened
+    // a little so they stay readable on the panel's dark background.
+    constexpr Color ColorGreen        = { 0x5, 0xC, 0x7, 0xF };
+    constexpr Color ColorBlue         = { 0x5, 0x8, 0xE, 0xF };
+    constexpr Color ColorAmber        = { 0xD, 0x9, 0x3, 0xF };
+    constexpr Color ColorOrange       = { 0xE, 0x8, 0x4, 0xF };
+    constexpr Color ColorRed          = { 0xE, 0x6, 0x6, 0xF };
         }
     }
 
