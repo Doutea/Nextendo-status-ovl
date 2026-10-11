@@ -123,13 +123,15 @@ static const UiText kNatWifi     = {"Wi-Fi", "Wi-Fi"};
 static const UiText kNatUnknown  = {"\u672A\u77E5", "Unknown"};
 static const UiText kNatYes      = {"\u662F", "Yes"};
 static const UiText kNatNo       = {"\u5426", "No"};
-static const UiText kNatGood     = {"\u826F\u597D\uFF08A/B \u7EA7\uFF09", "Good (A/B)"};
-static const UiText kNatPoor     = {"\u4E00\u822C\uFF08C \u7EA7\uFF09", "Fair (C)"};
-static const UiText kNatBad      = {"\u8F83\u5DEE\uFF08D \u7EA7\uFF09", "Poor (D)"};
-static const UiText kNatFailing  = {"\u4E0D\u53EF\u7528\uFF08F\uFF09", "Unavailable (F)"};
+static const UiText kNatGood     = {"\u826F\u597D", "Good"};
+static const UiText kNatPoor     = {"\u4E00\u822C", "Fair"};
+static const UiText kNatBad      = {"\u8F83\u5DEE", "Poor"};
+static const UiText kNatFailing  = {"\u4E0D\u53EF\u7528", "Unavailable"};
 static const UiText kNatEi       = {"\u7AEF\u70B9\u65E0\u5173", "Endpoint-independent"};
 static const UiText kNatAd       = {"\u5730\u5740\u76F8\u5173", "Address-dependent"};
 static const UiText kNatApd      = {"\u5730\u5740\u7AEF\u53E3\u76F8\u5173", "Address-and-port-dependent"};
+static const UiText kNatFilter      = {"\u8FC7\u6EE4\u884C\u4E3A", "Filtering"};
+static const UiText kNatNotMeasured = {"\u672A\u6D4B\u5B9A", "Not measured"};
 
 static const char* T(const UiText& text) {
     return g_useChinese ? text.zh : text.en;
@@ -576,11 +578,16 @@ struct StunServer {
 };
 
 static const StunServer kStunServers[] = {
+    // One entry per distinct address: two hostnames that share one address would
+    // make the mapping test compare a destination with itself.
     {"stun.l.google.com", 19302, "74.125.250.129"},
-    {"stun1.l.google.com", 19302, "74.125.250.129"},
     {"stun.cloudflare.com", 3478, "162.159.207.0"},
     {"stun.miwifi.com", 3478, "111.206.174.2"},
     {"stun.hot-chilli.net", 3478, "144.76.136.87"},
+    {"stun.nextcloud.com", 3478, "46.225.95.169"},
+    {"stun.telnyx.com", 3478, "192.76.120.66"},
+    {"stun.dus.net", 3478, "83.125.8.45"},
+    {"stun.sipthor.net", 3478, "108.163.134.186"},
 };
 static const int kStunServerCount = static_cast<int>(sizeof(kStunServers) / sizeof(kStunServers[0]));
 
@@ -905,28 +912,50 @@ static void runNatDetection() {
     // reuses the same mapping, so every server reports the same port.
     StunSocket probe;
     if (probe.open()) {
+        std::vector<std::string> destinations;
+        std::vector<std::string> mappedIps;
         std::vector<u16> mappedPorts;
-        for (int i = 0; i < kStunServerCount && mappedPorts.size() < 3; ++i) {
+
+        for (int i = 0; i < kStunServerCount && destinations.size() < 3; ++i) {
             const std::string address = stunServerAddress(kStunServers[i]);
             if (address.empty()) continue;
 
+            // Compare only distinct destinations. A NAT whose mapping depends on
+            // the destination still reuses one mapping per destination address,
+            // so probing one address repeatedly would look endpoint-independent
+            // when it is not.
+            if (std::find(destinations.begin(), destinations.end(), address) !=
+                destinations.end())
+                continue;
+
             std::string mappedIp;
             u16 mappedPort = 0;
-            if (probe.query(address, kStunServers[i].port, 2500, mappedIp, mappedPort)) {
-                if (result.publicIp.empty()) {
-                    result.publicIp = mappedIp;
-                    result.publicPort = mappedPort;
-                    result.udpWorking = true;
-                }
-                mappedPorts.push_back(mappedPort);
+            if (!probe.query(address, kStunServers[i].port, 2500, mappedIp, mappedPort))
+                continue;
+
+            destinations.push_back(address);
+            mappedIps.push_back(mappedIp);
+            mappedPorts.push_back(mappedPort);
+
+            if (result.publicIp.empty()) {
+                result.publicIp = mappedIp;
+                result.publicPort = mappedPort;
+                result.udpWorking = true;
             }
         }
 
-        if (mappedPorts.size() >= 2) {
-            const bool allEqual = std::all_of(mappedPorts.begin(), mappedPorts.end(),
+        // Two distinct destinations are the minimum that can say anything about
+        // the mapping; with one, the result is left unknown rather than guessed.
+        if (destinations.size() >= 2) {
+            const bool samePort = std::all_of(mappedPorts.begin(), mappedPorts.end(),
                                               [&](u16 p) { return p == mappedPorts[0]; });
-            result.mapping = allEqual ? NatMapping::EndpointIndependent
-                                      : NatMapping::AddressPortDependent;
+            const bool sameAddress = std::all_of(
+                mappedIps.begin(), mappedIps.end(),
+                [&](const std::string& ip) { return ip == mappedIps[0]; });
+            if (sameAddress) {
+                result.mapping = samePort ? NatMapping::EndpointIndependent
+                                          : NatMapping::AddressPortDependent;
+            }
         }
         if (!mappedPorts.empty())
             result.portPreserved = (mappedPorts[0] == probe.localPort);
@@ -1684,6 +1713,8 @@ public:
         list->addItem(m_mappingItem);
         m_portItem = new tsl::elm::ListItem(T(kNatPort));
         list->addItem(m_portItem);
+        m_filterItem = new tsl::elm::ListItem(T(kNatFilter));
+        list->addItem(m_filterItem);
         m_cgnatItem = new tsl::elm::ListItem(T(kNatCgnat));
         list->addItem(m_cgnatItem);
         m_publicItem = new tsl::elm::ListItem(T(kNatPublic));
@@ -1760,12 +1791,16 @@ private:
             setValue(m_gradeItem, T(kNatUnknown), true);
             setValue(m_mappingItem, T(kNatUnknown), true);
             setValue(m_portItem, T(kNatUnknown), true);
+            setValue(m_filterItem, T(kNatUnknown), true);
             setValue(m_cgnatItem, T(kNatUnknown), true);
             setValue(m_publicItem, T(kNatUnknown), true);
         } else {
             setValue(m_gradeItem, gradeText(snapshot.grade), false);
             setValue(m_mappingItem, mappingText(snapshot.mapping), false);
             setValue(m_portItem, snapshot.portPreserved ? T(kNatYes) : T(kNatNo), false);
+            // Stated plainly: no public STUN server can drive the filtering
+            // test, so the cone subtype is genuinely unknown.
+            setValue(m_filterItem, T(kNatNotMeasured), true);
 
             if (!snapshot.cgnatKnown) {
                 setValue(m_cgnatItem, T(kNatUnknown), true);
@@ -1805,6 +1840,7 @@ private:
     tsl::elm::ListItem* m_gradeItem = nullptr;
     tsl::elm::ListItem* m_mappingItem = nullptr;
     tsl::elm::ListItem* m_portItem = nullptr;
+    tsl::elm::ListItem* m_filterItem = nullptr;
     tsl::elm::ListItem* m_cgnatItem = nullptr;
     tsl::elm::ListItem* m_publicItem = nullptr;
     tsl::elm::ListItem* m_localIpItem = nullptr;
