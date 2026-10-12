@@ -16,7 +16,7 @@
 ## 功能
 
 - **总在线人数** —— 和官网状态页显示的数字一致
-- **游戏列表** —— 按人数从多到少排列，一眼看出哪个游戏最热闹
+- **游戏列表** —— 列出全部游戏服务器，按人数从多到少排列，一眼看出哪个最热闹
 - **中文游戏名** —— 英文原名过长的游戏会显示中文名
 - **自动刷新** —— 面板打开时每 15 秒更新一次
 - **手动刷新** —— 选中「在线人数」按 **A** 立即刷新
@@ -98,7 +98,7 @@ leaving your game.
 ## Features
 
 - **Total players online**, from the same endpoint the website's status page uses
-- **Per-game breakdown**, busiest first
+- **Every game server listed**, busiest first
 - **Automatic refresh** every 15 seconds while the panel is open
 - **Manual refresh** by selecting **Players online** and pressing **A**
 - **Opens instantly** — the last known numbers are cached, so there is no wait
