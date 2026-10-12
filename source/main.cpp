@@ -16,6 +16,7 @@
 #include <string>
 #include <algorithm>
 #include <cstdlib>
+#include <mutex>
 #include <cstring>
 
 // ---------------------------------------------------------------------------
@@ -1092,29 +1093,121 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
      "Nintendo Switch \u8FD0\u52A8"},
     {"Monopoly for Nintendo Switch",
      "\u5730\u4EA7\u5927\u4EA8"},
+    {"Légendes Pokémon : Z-A",
+     "\u5B9D\u53EF\u68A6\u4F20\u8BF4 Z-A"},
+    {"DRAGON BALL FighterZ",
+     "\u9F99\u73E0 \u6597\u58EBZ"},
+    {"Pokémon Scarlet",
+     "\u5B9D\u53EF\u68A6 \u6731"},
+    {"Pokémon Violet",
+     "\u5B9D\u53EF\u68A6 \u7D2B"},
+    {"Just Shapes & Beats",
+     "\u5F62\u72B6\u4E0E\u97F3\u7B26"},
 };
 
-// Chinese name when the console is set to Chinese, otherwise the API's own
-// name. A non-Chinese console has no Chinese font loaded, and forcing a Chinese
-// title on it would be both unreadable and wrong for that player's locale.
-static std::string localisedName(const std::string& apiName) {
+// Lowercases and drops accents and punctuation so two spellings of one title
+// compare equal. "MONSTER HUNTER GENERATIONS ULTIMATE" and "Monster Hunter
+// Generations Ultimate" are the same game, as are the en dash and hyphen forms of
+// "Nintendo 64 - Nintendo Classics".
+static std::string normaliseName(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+
+        // Accented letters used in these titles, folded onto their base letter.
+        // Matched as the two-byte UTF-8 sequences they are.
+        if (c == 0xC3 && i + 1 < text.size()) {
+            const unsigned char d = static_cast<unsigned char>(text[i + 1]);
+            char folded = 0;
+            switch (d) {
+                case 0xA9: case 0xA8: case 0xAA: folded = 'e'; break;  // e-acute, e-grave, e-circumflex
+                case 0xA1: case 0xA0:            folded = 'a'; break;  // a-acute, a-grave
+                case 0xAD:                       folded = 'i'; break;  // i-acute
+                case 0xB3: case 0xB4:            folded = 'o'; break;  // o-acute, o-circumflex
+                case 0xBA: case 0xB9:            folded = 'u'; break;  // u-acute, u-grave
+                default: break;
+            }
+            if (folded != 0) {
+                out += folded;
+                ++i;
+                continue;
+            }
+        }
+
+        if (c >= 'A' && c <= 'Z') {
+            out += static_cast<char>(c - 'A' + 'a');
+        } else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            out += static_cast<char>(c);
+        }
+        // Anything else - spaces, dashes, colons, ampersands, other non-ASCII -
+        // contributes nothing.
+    }
+
+    return out;
+}
+
+// Chinese name when the console is set to Chinese, otherwise the API's own name.
+// A non-Chinese console has no Chinese font loaded, and forcing a Chinese title on
+// it would be both unreadable and wrong for that player's locale.
+//
+// The lookups go from most to least exact, because the API's names do not always
+// match the table's keys:
+//
+//   1. the fetched table, by the name exactly as given;
+//   2. the fetched table, by normalised name - this is what covers the API
+//      shouting a title or spelling its punctuation differently;
+//   3. the compiled table, likewise normalised;
+//   4. the title ids, through kSiteGames - this covers games the API has renamed
+//      or split, where the table key is the site's older name.
+static std::string localisedName(const std::string& apiName,
+                                 const std::vector<std::string>& titleIds = {}) {
     if (!nextendoIsChinese()) return apiName;
 
-    // The fetched table wins, so an edit in the repository takes effect without
-    // a new build.
+    const std::string wanted = normaliseName(apiName);
+
+    // The fetched table wins, so an edit in the repository takes effect without a
+    // new build.
     {
         mutexLock(&g_namesMutex);
+
         auto fetched = g_namesZhOverride.find(apiName);
         if (fetched != g_namesZhOverride.end()) {
             const std::string name = fetched->second;
             mutexUnlock(&g_namesMutex);
             return name;
         }
+
+        if (!wanted.empty()) {
+            auto byNorm = g_namesZhByNorm.find(wanted);
+            if (byNorm != g_namesZhByNorm.end()) {
+                const std::string name = byNorm->second;
+                mutexUnlock(&g_namesMutex);
+                return name;
+            }
+        }
+
         mutexUnlock(&g_namesMutex);
     }
 
     auto builtin = g_gameNamesZh.find(apiName);
-    return (builtin != g_gameNamesZh.end()) ? builtin->second : apiName;
+    if (builtin != g_gameNamesZh.end()) return builtin->second;
+
+    if (!wanted.empty()) {
+        for (const auto& entry : g_gameNamesZh) {
+            if (normaliseName(entry.first) == wanted) return entry.second;
+        }
+    }
+
+    // Renamed or split entries. kSiteGames holds the title ids but its names are
+    // not always the table's keys, so the id-to-name mapping is used directly.
+    if (!titleIds.empty()) {
+        const std::string byId = lookupByTitleId(titleIds);
+        if (!byId.empty()) return byId;
+    }
+
+    return apiName;
 }
 // ---------------------------------------------------------------------------
 // Chinese name table, updatable without a new release
@@ -1163,11 +1256,87 @@ static std::map<std::string, std::string> parseNamesTable(const std::string& tex
     return table;
 }
 
+// Chinese names indexed by title id, built from kSiteGames.
+//
+// kSiteGames knows every title id a game reports under, and its names are the keys
+// the table uses, so this is what covers a game the API has renamed or split: the
+// API name misses, but its title id does not.
+//
+// Built outside g_namesMutex: it reads the override table, which the polling
+// thread replaces, and taking the mutex here would mean reading it while holding
+// it from localisedName().
+static std::mutex g_idIndexMutex;
+static std::map<std::string, std::string> g_namesZhById;
+static bool g_namesZhByIdReady = false;
+
+static void ensureIdNameIndex() {
+    std::lock_guard<std::mutex> lock(g_idIndexMutex);
+    if (g_namesZhByIdReady) return;
+
+    std::map<std::string, std::string> fetched;
+    {
+        mutexLock(&g_namesMutex);
+        fetched = g_namesZhOverride;
+        mutexUnlock(&g_namesMutex);
+    }
+
+    std::map<std::string, std::string> byId;
+    for (const auto& game : kSiteGames) {
+        // A fetched translation wins over the compiled one.
+        auto name = fetched.find(game.name);
+        if (name != fetched.end()) {
+            for (const char* id : game.ids) {
+                if (id == nullptr) break;
+                byId[id] = name->second;
+            }
+            continue;
+        }
+
+        auto compiled = g_gameNamesZh.find(game.name);
+        if (compiled == g_gameNamesZh.end()) continue;
+        for (const char* id : game.ids) {
+            if (id == nullptr) break;
+            byId[id] = compiled->second;
+        }
+    }
+
+    g_namesZhById = std::move(byId);
+    g_namesZhByIdReady = true;
+}
+
+static std::string lookupByTitleId(const std::vector<std::string>& titleIds) {
+    ensureIdNameIndex();
+
+    std::lock_guard<std::mutex> lock(g_idIndexMutex);
+    for (const auto& id : titleIds) {
+        auto it = g_namesZhById.find(id);
+        if (it != g_namesZhById.end()) return it->second;
+    }
+    return std::string();
+}
+
 static void applyNamesTable(std::map<std::string, std::string> table) {
     if (table.empty()) return;
+
+    // Index the same entries by normalised name as well, so a game whose name the
+    // API spells differently still finds its translation. Built here rather than
+    // in localisedName() because that runs for every row on every refresh.
+    std::map<std::string, std::string> byNorm;
+    for (const auto& entry : table) {
+        const std::string key = normaliseName(entry.first);
+        if (!key.empty()) byNorm[key] = entry.second;
+    }
+
     mutexLock(&g_namesMutex);
     g_namesZhOverride = std::move(table);
+    g_namesZhByNorm = std::move(byNorm);
     mutexUnlock(&g_namesMutex);
+
+    // The id index folds the fetched table in, so it has to be rebuilt.
+    {
+        std::lock_guard<std::mutex> lock(g_idIndexMutex);
+        g_namesZhByIdReady = false;
+    }
 }
 
 // Kept verbatim so the next run needs no network request.
@@ -1395,7 +1564,7 @@ private:
         // must count as a change so the rows are rebuilt with the new label.
         std::vector<std::string> names;
         names.reserve(jeux.size());
-        for (const auto& j : jeux) names.push_back(localisedName(j.name));
+        for (const auto& j : jeux) names.push_back(localisedName(j.name, j.titleIds));
 
         // Same games as before: refresh the numbers in place. That is the common
         // case and it leaves the selection alone.
@@ -1436,7 +1605,7 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            auto* item = new tsl::elm::ListItem(localisedName(j.name));
+            auto* item = new tsl::elm::ListItem(localisedName(j.name, j.titleIds));
             applyValueColour(item, std::to_string(j.players));
             list->addItem(item);
             m_rows[j.name] = item;
