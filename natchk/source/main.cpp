@@ -132,13 +132,15 @@ static std::string fetchUrl(const std::string& url, std::string& errorOut) {
 }
 
 static const SocketInitConfig socketConfig = {
-    .tcp_tx_buf_size = 0x800,
-    .tcp_rx_buf_size = 0x1000,
-    .tcp_tx_buf_max_size = 0x10000,
-    .tcp_rx_buf_max_size = 0x10000,
+    .tcp_tx_buf_size     = 0x800,
+    .tcp_rx_buf_size     = 0x1000,
+    .tcp_tx_buf_max_size = 0x2500,
+    .tcp_rx_buf_max_size = 0x2500,
     .udp_tx_buf_size = 0x2400,
     .udp_rx_buf_size = 0xA500,
     .sb_efficiency = 4,
+    .num_bsd_sessions = 3,
+    .bsd_service_type = BsdServiceType_User,
 };
 
 // ---------------------------------------------------------------------------
