@@ -1711,12 +1711,9 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            const bool pinned = (j.name == g_pinnedGame);
-            const std::string label =
-                pinned ? (std::string("\u2605 ") + localisedName(j.name, j.titleIds))
-                       : localisedName(j.name, j.titleIds);
-
-            auto* item = new tsl::elm::ListItem(label);
+            // No marker on the name: a pinned game is simply at the top of the
+            // list, which is enough to tell it apart.
+            auto* item = new tsl::elm::ListItem(localisedName(j.name, j.titleIds));
             applyValueColour(item, std::to_string(j.players));
 
             // X pins this game to the top, or clears the pin if it is already
