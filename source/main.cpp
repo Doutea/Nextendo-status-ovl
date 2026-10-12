@@ -1509,6 +1509,65 @@ static void applyValueColour(tsl::elm::ListItem* item, const std::string& value)
                                : tsl::style::color::ColorValueBlue);
 }
 
+// The game pinned to the top of the list, by the API's own name so it survives
+// the display name being translated. Empty means nothing is pinned.
+//
+// Only touched from the render thread: the polling thread never reads it.
+static std::string g_pinnedGame;
+
+static const char* kPinnedPath = "/switch/nextendo-status/pinned.txt";
+
+// The name would only ever be a game title, so a line-based file needs no escaping.
+static void savePinnedGame() {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    fsFsDeleteFile(&fs, kPinnedPath);
+    if (R_SUCCEEDED(fsFsCreateFile(&fs, kPinnedPath, g_pinnedGame.size(), 0))) {
+        FsFile file{};
+        if (R_SUCCEEDED(fsFsOpenFile(&fs, kPinnedPath, FsOpenMode_Write, &file))) {
+            fsFileWrite(&file, 0, g_pinnedGame.data(), g_pinnedGame.size(),
+                        FsWriteOption_Flush);
+            fsFileClose(&file);
+        }
+    }
+    fsFsClose(&fs);
+}
+
+// Read during initialisation, before the panel is built.
+static void loadPinnedGame() {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    FsFile file{};
+    if (R_FAILED(fsFsOpenFile(&fs, kPinnedPath, FsOpenMode_Read, &file))) {
+        fsFsClose(&fs);
+        return;
+    }
+
+    s64 size = 0;
+    fsFileGetSize(&file, &size);
+    if (size <= 0 || size > 4096) {
+        fsFileClose(&file);
+        fsFsClose(&fs);
+        return;
+    }
+
+    std::string content(static_cast<size_t>(size), '\0');
+    u64 bytesRead = 0;
+    const Result readResult = fsFileRead(&file, 0, content.data(), content.size(),
+                                         FsReadOption_None, &bytesRead);
+    fsFileClose(&file);
+    fsFsClose(&fs);
+    if (R_FAILED(readResult)) return;
+
+    content.resize(static_cast<size_t>(bytesRead));
+    while (!content.empty() && (content.back() == '\n' || content.back() == '\r')) {
+        content.pop_back();
+    }
+    g_pinnedGame = content;
+}
+
 class GuiTest : public tsl::Gui {
 public:
     // No I/O here: fetching in the constructor is what made the panel take
@@ -1580,6 +1639,27 @@ public:
     }
 
 private:
+    // Pins or unpins a game and redraws the list, keeping focus on that game.
+    //
+    // Rebuilding is asked for directly rather than inferred from a changed value,
+    // because the row order is the thing that changes: a pinned game's player
+    // count is usually identical to the one already on screen.
+    void applyPin(const std::string& gameName) {
+        g_pinnedGame = (g_pinnedGame == gameName) ? std::string() : gameName;
+        savePinnedGame();
+
+        // Rebuilding destroys the rows, so the focus has to be dropped first.
+        this->removeFocus();
+
+        m_shownNames.clear();
+        refreshUI();
+
+        auto it = m_rows.find(gameName);
+        if (it != m_rows.end() && it->second != nullptr) {
+            this->requestFocus(it->second, tsl::FocusDirection::None);
+        }
+    }
+
     // Rebuilds the entry rows when the set of games changes.
     //
     // The list is reconstructed rather than edited, because rows are added and
@@ -1631,8 +1711,25 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            auto* item = new tsl::elm::ListItem(localisedName(j.name, j.titleIds));
+            const bool pinned = (j.name == g_pinnedGame);
+            const std::string label =
+                pinned ? (std::string("\u2605 ") + localisedName(j.name, j.titleIds))
+                       : localisedName(j.name, j.titleIds);
+
+            auto* item = new tsl::elm::ListItem(label);
             applyValueColour(item, std::to_string(j.players));
+
+            // X pins this game to the top, or clears the pin if it is already
+            // there. The name is captured by value: the row outlives the loop.
+            const std::string gameName = j.name;
+            item->setClickListener([this, gameName](u64 keys) {
+                if ((keys & HidNpadButton_X) != 0) {
+                    applyPin(gameName);
+                    return true;
+                }
+                return false;
+            });
+
             list->addItem(item);
             m_rows[j.name] = item;
         }
@@ -1720,8 +1817,15 @@ private:
         int total = 0;
         for (const auto& j : jeux) total += j.players;
 
-        // Busiest first.
+        // Pinned first, then busiest first.
+        //
+        // The pinned game is lifted regardless of its player count, which is the
+        // point of pinning: the games someone actually plays are rarely the ones
+        // with the most players online.
         std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
+            const bool aPinned = (a.name == g_pinnedGame);
+            const bool bPinned = (b.name == g_pinnedGame);
+            if (aPinned != bPinned) return aPinned;
             if (a.players != b.players) return a.players > b.players;
             return a.name < b.name;
         });
@@ -1771,6 +1875,8 @@ public:
         // Put the last known numbers on screen straight away. A fetch on this
         // console can take 8-20s, so without this the panel sits empty.
         loadCountsCache();
+        // So the pinned game is at the top on the first draw.
+        loadPinnedGame();
         // Same for the name table, so the cached translations are used offline.
         loadNamesCache();
 
