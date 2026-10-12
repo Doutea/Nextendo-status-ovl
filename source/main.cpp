@@ -1509,25 +1509,36 @@ static void applyValueColour(tsl::elm::ListItem* item, const std::string& value)
                                : tsl::style::color::ColorValueBlue);
 }
 
-// The game pinned to the top of the list, by the API's own name so it survives
-// the display name being translated. Empty means nothing is pinned.
+// Games pinned above the rest, by the API's own name so a pin survives the
+// display name being translated. Stored in the order they were pinned, so the
+// list keeps a stable, predictable order.
 //
 // Only touched from the render thread: the polling thread never reads it.
-static std::string g_pinnedGame;
+static std::vector<std::string> g_pinnedGames;
+
+// Position in the pinned order, or -1 when not pinned.
+static int pinnedRank(const std::string& gameName) {
+    for (size_t i = 0; i < g_pinnedGames.size(); i++) {
+        if (g_pinnedGames[i] == gameName) return static_cast<int>(i);
+    }
+    return -1;
+}
 
 static const char* kPinnedPath = "/switch/nextendo-status/pinned.txt";
 
 // The name would only ever be a game title, so a line-based file needs no escaping.
 static void savePinnedGame() {
+    std::string text;
+    for (const auto& name : g_pinnedGames) text += name + "\n";
+
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
 
     fsFsDeleteFile(&fs, kPinnedPath);
-    if (R_SUCCEEDED(fsFsCreateFile(&fs, kPinnedPath, g_pinnedGame.size(), 0))) {
+    if (R_SUCCEEDED(fsFsCreateFile(&fs, kPinnedPath, text.size(), 0))) {
         FsFile file{};
         if (R_SUCCEEDED(fsFsOpenFile(&fs, kPinnedPath, FsOpenMode_Write, &file))) {
-            fsFileWrite(&file, 0, g_pinnedGame.data(), g_pinnedGame.size(),
-                        FsWriteOption_Flush);
+            fsFileWrite(&file, 0, text.data(), text.size(), FsWriteOption_Flush);
             fsFileClose(&file);
         }
     }
@@ -1562,10 +1573,18 @@ static void loadPinnedGame() {
     if (R_FAILED(readResult)) return;
 
     content.resize(static_cast<size_t>(bytesRead));
-    while (!content.empty() && (content.back() == '\n' || content.back() == '\r')) {
-        content.pop_back();
+
+    // One game name per line.
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        const size_t eol = content.find('\n', pos);
+        std::string line =
+            content.substr(pos, (eol == std::string::npos ? content.size() : eol) - pos);
+        pos = (eol == std::string::npos) ? content.size() + 1 : eol + 1;
+
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (!line.empty()) g_pinnedGames.push_back(line);
     }
-    g_pinnedGame = content;
 }
 
 class GuiTest : public tsl::Gui {
@@ -1639,25 +1658,33 @@ public:
     }
 
 private:
-    // Pins or unpins a game and redraws the list, keeping focus on that game.
+    // Pins or unpins a game, then rebuilds the list and puts the focus back on it.
     //
-    // Rebuilding is asked for directly rather than inferred from a changed value,
-    // because the row order is the thing that changes: a pinned game's player
-    // count is usually identical to the one already on screen.
+    // Rebuilding destroys the rows, so the focus has to be dropped first. It is
+    // restored through List::requestFocusOn(): passing the item to
+    // Gui::requestFocus() would not work, because that only forwards to
+    // List::requestFocus(), which answers with the first focusable row.
     void applyPin(const std::string& gameName) {
-        g_pinnedGame = (g_pinnedGame == gameName) ? std::string() : gameName;
+        const int rank = pinnedRank(gameName);
+        if (rank >= 0) {
+            g_pinnedGames.erase(g_pinnedGames.begin() + rank);
+        } else {
+            g_pinnedGames.push_back(gameName);
+        }
         savePinnedGame();
 
-        // Rebuilding destroys the rows, so the focus has to be dropped first.
         this->removeFocus();
 
         m_shownNames.clear();
         refreshUI();
 
+        if (m_list == nullptr) return;
+
         auto it = m_rows.find(gameName);
-        if (it != m_rows.end() && it->second != nullptr) {
-            this->requestFocus(it->second, tsl::FocusDirection::None);
-        }
+        if (it == m_rows.end() || it->second == nullptr) return;
+
+        m_list->requestFocusOn(it->second);
+        this->requestFocus(m_list, tsl::FocusDirection::None);
     }
 
     // Rebuilds the entry rows when the set of games changes.
@@ -1820,9 +1847,13 @@ private:
         // point of pinning: the games someone actually plays are rarely the ones
         // with the most players online.
         std::sort(jeux.begin(), jeux.end(), [](const JeuEntry& a, const JeuEntry& b) {
-            const bool aPinned = (a.name == g_pinnedGame);
-            const bool bPinned = (b.name == g_pinnedGame);
-            if (aPinned != bPinned) return aPinned;
+            const int aRank = pinnedRank(a.name);
+            const int bRank = pinnedRank(b.name);
+            if (aRank >= 0 || bRank >= 0) {
+                if (aRank < 0) return false;
+                if (bRank < 0) return true;
+                return aRank < bRank;
+            }
             if (a.players != b.players) return a.players > b.players;
             return a.name < b.name;
         });
