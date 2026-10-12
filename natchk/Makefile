@@ -36,9 +36,6 @@ APP_TITLE   := NAT Check
 APP_AUTHOR  := Nextendo
 APP_VERSION := 1.1.0
 
-# Exposed to the source so the panel can show it under the title.
-DEFINES     += -DNATCHK_VERSION="\"$(APP_VERSION)\""
-
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
