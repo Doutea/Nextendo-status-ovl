@@ -23,10 +23,14 @@ DATA		:=	data
 INCLUDES	:=	../libs/libtesla/include source
 
 #---------------------------------------------------------------------------------
-# No icon for overlays, no nacp
+# No icon for overlays.
+#
+# NACP is required even though this is an overlay: the overlay menu reads the
+# display name and version out of it, and skips any .ovl whose NRO header length
+# is not smaller than the file (that is, any file with no NACP appended). Without
+# it the menu silently omits this overlay.
 #---------------------------------------------------------------------------------
 NO_ICON		:=  1
-NO_NACP		:=  1
 
 APP_TITLE   := NAT Check
 APP_AUTHOR  := Nextendo
