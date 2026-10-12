@@ -20,6 +20,7 @@
 - **中文游戏名** —— 游戏会显示中文名
 - **自动刷新** —— 面板打开时每 15 秒更新一次
 - **手动刷新** —— 选中「在线人数」按 **A** 立即刷新
+- **置顶游戏** —— 在游戏列表里选中一个游戏按 **X** 置顶，再按 **X** 取消
 - **打开即显示** —— 记住上次的人数
 - **中英双语界面** —— 跟随主机系统语言自动切换
 
@@ -35,6 +36,7 @@
 | 按键 | 作用 |
 |------|------|
 | **A** | 在「在线人数」上按下 → 立即刷新 |
+| **X** | 在游戏列表里选中一个游戏 → 置顶 / 取消置顶 |
 | **B** | 关闭面板 |
 | **摇杆** | 上下滚动列表 |
 
@@ -56,6 +58,7 @@
 - **第一次打开**会稍慢一点：需要联网取数。之后打开会立刻显示上次的人数，再自动更新。
 - **不会看到报错**：网络失败时会保留上一次的人数，不会显示超时或错误提示，只是数字暂时不更新。
 - **不需要任何设置**：装好就能用。
+- **置顶会被记住**：按 X 置顶的游戏会保存在 SD 卡上，重启主机后依然在列表最前。
 
 ## 常见问题
 
@@ -66,7 +69,7 @@
 检查主机是否联网。网络不稳定时会保留旧数据，恢复后会自动更新。
 
 **游戏显示的是英文名？**
-只有对照表里有的游戏才显示中文，新上线的游戏会先显示英文原名，后续版本会补充。
+新上线的游戏会自动出现在列表里，先显示官方原名；该游戏的中文名补充到对照表后就会显示中文。
 
 ## 致谢与许可
 
@@ -88,6 +91,7 @@ leaving your game.
 - **Per-game breakdown**, busiest first
 - **Automatic refresh** every 15 seconds while the panel is open
 - **Manual refresh** by selecting **Players online** and pressing **A**
+- **Pin a game** to the top of the list by selecting it and pressing **X**; press **X** again to unpin it
 - **Opens instantly** — the last known numbers are cached, so there is no wait
 - **Chinese and English interface**, chosen from the console's system language
 
@@ -102,6 +106,7 @@ leaving your game.
 | Button | Action |
 |--------|--------|
 | **A** | Refresh (on the *Players online* row) |
+| **X** | Pin / unpin the selected game (in the game list) |
 | **B** | Close the overlay |
 | **Stick** | Scroll the list |
 
@@ -126,6 +131,8 @@ Overlay).
   previous numbers straight away, then update in the background.
 - A failed refresh keeps the numbers already on screen rather than showing an
   error, so a flaky connection never leaves you with an empty panel.
+- A pinned game is remembered on the SD card, so it is still at the top after a
+  reboot.
 
 ## Credits and licence
 
