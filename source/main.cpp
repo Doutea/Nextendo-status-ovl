@@ -1042,7 +1042,7 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
     {"ARMS",
      "ARMS"},
     {"Mario Tennis Aces",
-     "\u9A6C\u529B\u6B27\u7F51\u7403 \u8D85\u7EA7\u6263\u6740"},
+     "\u9A6C\u529B\u6B27\u7F51\u7403 Aces"},
     {"Super Mario Maker 2",
      "\u8D85\u7EA7\u9A6C\u529B\u6B27\u5236\u9020 2"},
     {"PAC-MAN 99",
@@ -1058,7 +1058,7 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
     {"Monster Hunter Generations Ultimate",
      "\u602A\u7269\u730E\u4EBA XX"},
     {"Crash Team Racing Nitro-Fueled",
-     "\u53E4\u60D1\u72FC\u8D5B\u8F66\u5B9D\u8D1D\u8F66"},
+     "\u53E4\u60D1\u72FC\u8D5B\u8F66\u91CD\u5236\u7248"},
     {"Diablo III: Eternal Collection",
      "\u6697\u9ED1\u7834\u574F\u795E III\uFF1A\u6C38\u6052\u4E4B\u6218"},
     {"Mario Party Superstars",
@@ -1068,7 +1068,7 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
     {"Overcooked! 2",
      "\u80E1\u95F9\u53A8\u623F 2"},
     {"Pok\u00E9mon Scarlet and Violet",
-     "\u5B9D\u53EF\u68A6 \u6731\uFF0F\u7D2B"},
+     "\u5B9D\u53EF\u68A6 \u6731\u7D2B"},
     {"Nintendo 64 - Nintendo Classics",
      "Nintendo 64 \u7ECF\u5178\u5408\u96C6"},
     {"Pok\u00E9mon Legends: Z-A",
@@ -1076,7 +1076,7 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
     {"Mario Golf: Super Rush",
      "\u9A6C\u529B\u6B27\u9AD8\u5C14\u592B\uFF1A\u8D85\u7EA7\u51B2\u523A"},
     {"Super Mario 3D World + Bowser's Fury",
-     "\u8D85\u7EA7\u9A6C\u529B\u6B27 3D \u4E16\u754C \uFF0B \u72C2\u6012\u4E16\u754C"},
+     "\u8D85\u7EA7\u9A6C\u529B\u6B27 3D \u4E16\u754C"},
     {"Super Mario Odyssey",
      "\u8D85\u7EA7\u9A6C\u529B\u6B27 \u5965\u5FB7\u8D5B"},
     {"METAL GEAR SOLID: Peace Walker",
@@ -1090,19 +1090,17 @@ static const std::map<std::string, std::string> g_gameNamesZh = {
     {"Saints Row: The Third - The Full Package",
      "\u9ED1\u9053\u5723\u5F92 3\uFF1A\u5B8C\u6574\u7248"},
     {"Ultimate Chicken Horse",
-     "\u7EC8\u6781\u9E21\u9A6C"},
+     "\u8D85\u7EA7\u9E21\u9A6C"},
     {"Nintendo Switch Sports",
      "Nintendo Switch \u8FD0\u52A8"},
     {"Monopoly for Nintendo Switch",
      "\u5730\u4EA7\u5927\u4EA8"},
-    {"Légendes Pokémon : Z-A",
+    {"Pok\u00E9mon Scarlet",
+     "\u5B9D\u53EF\u68A6 \u6731\u7D2B"},
+    {"L\u00E9gendes Pok\u00E9mon : Z-A",
      "\u5B9D\u53EF\u68A6\u4F20\u8BF4 Z-A"},
     {"DRAGON BALL FighterZ",
      "\u9F99\u73E0 \u6597\u58EBZ"},
-    {"Pokémon Scarlet",
-     "\u5B9D\u53EF\u68A6 \u6731"},
-    {"Pokémon Violet",
-     "\u5B9D\u53EF\u68A6 \u7D2B"},
     {"Just Shapes & Beats",
      "\u5F62\u72B6\u4E0E\u97F3\u7B26"},
 };
@@ -1207,6 +1205,32 @@ static std::string lookupByTitleId(const std::vector<std::string>& titleIds) {
         if (it != g_namesZhById.end()) return it->second;
     }
     return std::string();
+}
+
+// True when a Chinese name exists for this game, by any of the lookups
+// localisedName() uses. Separate from localisedName() so the check does not have
+// to build the translated string.
+static bool hasTranslation(const std::string& apiName,
+                           const std::vector<std::string>& titleIds) {
+    const std::string wanted = normaliseName(apiName);
+    if (wanted.empty()) return false;
+
+    {
+        mutexLock(&g_namesMutex);
+        const bool found =
+            g_namesZhOverride.count(apiName) != 0 || g_namesZhByNorm.count(wanted) != 0;
+        mutexUnlock(&g_namesMutex);
+        if (found) return true;
+    }
+
+    if (g_gameNamesZh.count(apiName) != 0) return true;
+    for (const auto& entry : g_gameNamesZh) {
+        if (normaliseName(entry.first) == wanted) return true;
+    }
+
+    if (!titleIds.empty() && !lookupByTitleId(titleIds).empty()) return true;
+
+    return false;
 }
 
 // Chinese name when the console is set to Chinese, otherwise the API's own name.
@@ -1455,15 +1479,15 @@ static void maybeRefreshNames(const std::vector<JeuEntry>& jeux) {
     bool need = !g_namesFetchAttempted.exchange(true);
 
     if (!need) {
-        mutexLock(&g_namesMutex);
         for (const auto& entry : jeux) {
-            if (g_namesZhOverride.count(entry.name) == 0 &&
-                g_gameNamesZh.count(entry.name) == 0) {
+            // Same matching localisedName() uses, so a game that is translated by
+            // normalised name or by title id does not look untranslated here and
+            // trigger a pointless download.
+            if (!hasTranslation(entry.name, entry.titleIds)) {
                 need = true;
                 break;
             }
         }
-        mutexUnlock(&g_namesMutex);
     }
     if (!need) return;
 
