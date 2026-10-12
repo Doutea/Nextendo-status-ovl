@@ -38,13 +38,34 @@ extern "C" bool nextendoIsChinese() {
     return g_useChinese;
 }
 
+// Is this one of the Chinese languages?
+static bool isChineseLanguage(SetLanguage language) {
+    return language == SetLanguage_ZHCN || language == SetLanguage_ZHHANS
+        || language == SetLanguage_ZHTW || language == SetLanguage_ZHHANT;
+}
+
+// Reads the console's language.
+//
+// appletGetDesiredLanguage() comes first because libnx initialises the applet
+// service itself. It does not answer on every console though - when it fails, the
+// fallback opens the `set:` service, which is what setGetSystemLanguage() talks
+// to. That call needs `set:` open: libnx's own startup opens set:sys only, briefly,
+// and closes it again.
 static bool detectChineseLanguage() {
-    u64 code = 0;
-    if (R_FAILED(appletGetDesiredLanguage(&code))) return false;
-    SetLanguage lang{};
-    if (R_FAILED(setMakeLanguage(code, &lang))) return false;
-    return lang == SetLanguage_ZHCN || lang == SetLanguage_ZHHANS
-        || lang == SetLanguage_ZHTW || lang == SetLanguage_ZHHANT;
+    u64 languageCode = 0;
+    SetLanguage language{};
+
+    if (R_SUCCEEDED(appletGetDesiredLanguage(&languageCode)) &&
+        R_SUCCEEDED(setMakeLanguage(languageCode, &language))) {
+        return isChineseLanguage(language);
+    }
+
+    if (R_FAILED(setInitialize())) return false;
+    const bool chinese = R_SUCCEEDED(setGetSystemLanguage(&languageCode)) &&
+                         R_SUCCEEDED(setMakeLanguage(languageCode, &language)) &&
+                         isChineseLanguage(language);
+    setExit();
+    return chinese;
 }
 
 struct UiText { const char* zh; const char* en; };
