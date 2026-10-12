@@ -82,6 +82,8 @@ static const UiText kApd         = {"\u5730\u5740\u7AEF\u53E3\u76F8\u5173", "Add
 // overlay processes on this console).
 // ---------------------------------------------------------------------------
 
+static void saveNatCache(const NatStatus& status);
+
 static std::string cacheEscape(const std::string& t) {
     std::string o; o.reserve(t.size());
     for (char c : t) { switch(c) { case '\\': o+="\\\\"; break; case '\t': o+="\\t"; break; case '\n': o+="\\n"; break; case '\r': o+="\\r"; break; default: o+=c; break; } }
