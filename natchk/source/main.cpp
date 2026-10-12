@@ -74,8 +74,26 @@ static const char* T(const UiText& t) {
     return g_useChinese ? t.zh : t.en;
 }
 
+// Shown under the title. The Makefile passes this in from APP_VERSION, so the
+// panel reports the version it was built from; the fallback keeps the file
+// compilable on its own.
+#ifndef NATCHECK_VERSION
+#define NATCHECK_VERSION "dev"
+#endif
+
 static const UiText kTitle       = {"\u7F51\u7EDC\u73AF\u5883\u68C0\u6D4B", "NAT Check"};
 static const UiText kSubtitle    = {"\u8FDE\u63A5\u4E0E NAT", "link & NAT"};
+static const UiText kStatus      = {"\u5F53\u524D\u72B6\u6001", "Status"};
+static const UiText kEnvRow      = {"\u7F51\u7EDC\u73AF\u5883", "Network"};        // 网络环境
+static const UiText kLocalNet    = {"\u672C\u5730\u7F51\u7EDC", "Local network"};  // 本地网络
+static const UiText kLinkType    = {"\u8FDE\u63A5\u65B9\u5F0F", "Link"};          // 连接方式
+static const UiText kSignal      = {"\u4FE1\u53F7\u5F3A\u5EA6", "Signal"};        // 信号强度
+static const UiText kLocalIp     = {"\u672C\u5730 IP", "Local IP"};                // 本地 IP
+static const UiText kSubnetMask  = {"\u5B50\u7F51\u63A9\u7801", "Subnet mask"};   // 子网掩码
+static const UiText kGateway     = {"\u7F51\u5173", "Gateway"};                    // 网关
+static const UiText kDns         = {"DNS", "DNS"};                                  // DNS
+static const UiText kWireless    = {"\u65E0\u7EBF", "Wireless"};                  // 无线
+static const UiText kWired       = {"\u6709\u7EBF", "Wired"};                     // 有线
 static const UiText kTesting     = {"\u68C0\u6D4B\u4E2D\u2026", "Testing\u2026"};
 static const UiText kUntested    = {"\u672A\u68C0\u6D4B", "Not tested"};
 static const UiText kRetest      = {"\u91CD\u65B0\u68C0\u6D4B", "Test again"};
@@ -341,6 +359,55 @@ static u16 portPart(const std::string& a) { size_t c=a.find(':'); return c==std:
 static void readLocalIp(std::string& out) {
     u32 addr=0,mask=0,gw=0,d1=0,d2=0;
     if (R_SUCCEEDED(nifmGetCurrentIpConfigInfo(&addr,&mask,&gw,&d1,&d2))) out=ipv4ToString(addr);
+}
+
+// Local network details, read from nifm. Each field is filled independently, so
+// whatever the system will answer is shown and the rest stays blank.
+struct LocalNet {
+    std::string linkType;      // 无线 / 有线
+    std::string signal;        // 强 / 中 / 弱
+    std::string ip;
+    std::string mask;
+    std::string gateway;
+    std::string dns;
+    bool any = false;
+};
+
+static std::string signalText(u32 strength) {
+    if (strength >= 80) return T(kExcellent);
+    if (strength >= 60) return T(kGood);
+    if (strength >= 30) return T(kFair);
+    return T(kPoor);
+}
+
+static LocalNet readLocalNet() {
+    LocalNet n;
+
+    NifmInternetConnectionType type{};
+    u32 strength = 0;
+    NifmInternetConnectionStatus status{};
+    if (R_SUCCEEDED(nifmGetInternetConnectionStatus(&type, &strength, &status))) {
+        if (type == NifmInternetConnectionType_WiFi) {
+            n.linkType = T(kWireless);
+            n.signal = signalText(strength);
+        } else if (type == NifmInternetConnectionType_Ethernet) {
+            n.linkType = T(kWired);
+        }
+    }
+
+    u32 addr = 0, mask = 0, gw = 0, dns1 = 0, dns2 = 0;
+    if (R_SUCCEEDED(nifmGetCurrentIpConfigInfo(&addr, &mask, &gw, &dns1, &dns2))) {
+        if (addr) n.ip = ipv4ToString(addr);
+        if (mask) n.mask = ipv4ToString(mask);
+        if (gw) n.gateway = ipv4ToString(gw);
+        // Only the primary resolver: the second one is usually a duplicate, and
+        // the row has space for one.
+        if (dns1) n.dns = ipv4ToString(dns1);
+    }
+
+    n.any = !n.linkType.empty() || !n.ip.empty() || !n.mask.empty() ||
+            !n.gateway.empty() || !n.dns.empty();
+    return n;
 }
 
 static std::string publicIpOverHttp() {
@@ -638,38 +705,55 @@ public:
 class GuiTest : public tsl::Gui {
 public:
     tsl::elm::OverlayFrame* m_frame=nullptr;
-    tsl::elm::ListItem* m_statusItem=nullptr;
     tsl::elm::ListItem* m_retestItem=nullptr;
+    tsl::elm::ListItem* m_envItem=nullptr;
     tsl::elm::ListItem* m_typeItem=nullptr;
     tsl::elm::ListItem* m_peerItem=nullptr;
     tsl::elm::ListItem* m_mappingItem=nullptr;
     tsl::elm::ListItem* m_publicItem=nullptr;
+    tsl::elm::ListItem* m_linkItem=nullptr;
+    tsl::elm::ListItem* m_signalItem=nullptr;
+    tsl::elm::ListItem* m_localIpItem=nullptr;
+    tsl::elm::ListItem* m_maskItem=nullptr;
+    tsl::elm::ListItem* m_gatewayItem=nullptr;
+    tsl::elm::ListItem* m_dnsItem=nullptr;
 
     virtual tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame(T(kTitle), T(kUntested));
+        m_frame = new tsl::elm::OverlayFrame(T(kTitle), NATCHECK_VERSION);
         auto* list = new tsl::elm::List();
 
-        list->addItem(new tsl::elm::CategoryHeader(T(kResult)));
+        // The rating used to be the subtitle. It lives in the list now so the
+        // subtitle can carry the version instead.
+        list->addItem(new tsl::elm::CategoryHeader(T(kStatus)));
 
-        // Status summary row — opens the detail screen when selected
-        m_statusItem = new tsl::elm::ListItem(natSummaryText());
-        m_statusItem->setClickListener([](u64 keys){
-            if (keys & HidNpadButton_A) { tsl::changeTo<NatDetailGui>(); return true; } return false;
-        });
-        list->addItem(m_statusItem);
-
-        // Re-test button
+        // Re-test first, so the action sits at the top of the list.
         m_retestItem = new tsl::elm::ListItem(T(kRetest));
         m_retestItem->setClickListener([](u64 keys){
             if (keys & HidNpadButton_A) { g_natRequested=true; return true; } return false;
         });
         list->addItem(m_retestItem);
 
+        m_envItem = new tsl::elm::ListItem(T(kEnvRow));
+        list->addItem(m_envItem);
+
+        // The detail screen is reachable by pressing A on the rating row.
+        m_envItem->setClickListener([](u64 keys){
+            if (keys & HidNpadButton_A) { tsl::changeTo<NatDetailGui>(); return true; } return false;
+        });
+
         list->addItem(new tsl::elm::CategoryHeader(T(kResult)));
         m_typeItem    = new tsl::elm::ListItem(T(kNatType));    list->addItem(m_typeItem);
         m_peerItem    = new tsl::elm::ListItem(T(kNatPeer));    list->addItem(m_peerItem);
         m_mappingItem = new tsl::elm::ListItem(T(kNatMapping)); list->addItem(m_mappingItem);
         m_publicItem  = new tsl::elm::ListItem(T(kNatPublic));  list->addItem(m_publicItem);
+
+        list->addItem(new tsl::elm::CategoryHeader(T(kLocalNet)));
+        m_linkItem    = new tsl::elm::ListItem(T(kLinkType));   list->addItem(m_linkItem);
+        m_signalItem  = new tsl::elm::ListItem(T(kSignal));     list->addItem(m_signalItem);
+        m_localIpItem = new tsl::elm::ListItem(T(kLocalIp));    list->addItem(m_localIpItem);
+        m_maskItem    = new tsl::elm::ListItem(T(kSubnetMask)); list->addItem(m_maskItem);
+        m_gatewayItem = new tsl::elm::ListItem(T(kGateway));    list->addItem(m_gatewayItem);
+        m_dnsItem     = new tsl::elm::ListItem(T(kDns));        list->addItem(m_dnsItem);
 
         m_frame->setContent(list);
         refresh();
@@ -689,13 +773,30 @@ private:
         NatStatus s; mutexLock(&g_natMutex); s=g_nat; mutexUnlock(&g_natMutex);
         bool testing = g_natTesting.load();
 
-        // Subtitle
-        if (testing)          m_frame->setSubtitle(T(kTesting));
-        else if (s.tested)    m_frame->setSubtitle(natSummaryText());
-        else                  m_frame->setSubtitle(T(kUntested));
+        // Subtitle is the version, set once at construction.
 
-        // Summary row
-        if (m_statusItem) { m_statusItem->setValue(natSummaryText()); m_statusItem->setValueColor(natSummaryColour()); }
+        // The rating row, which is where the status word lives now.
+        if (m_envItem) {
+            m_envItem->setValue(natSummaryText());
+            if (testing || !s.tested) {
+                m_envItem->setValueColor(tsl::style::color::ColorDescription);
+            } else {
+                m_envItem->setValueColor(natSummaryColour());
+            }
+        }
+
+        // Local network, read live: it can change while the panel is open, for
+        // instance when the console is docked.
+        const LocalNet net = readLocalNet();
+        if (m_linkItem)    m_linkItem->setValue(net.linkType.empty() ? T(kUnknown) : net.linkType, net.linkType.empty());
+        if (m_signalItem) {
+            const bool has = !net.signal.empty();
+            m_signalItem->setValue(has ? net.signal : T(kUnknown), !has);
+        }
+        if (m_localIpItem) m_localIpItem->setValue(net.ip.empty() ? T(kUnknown) : net.ip, net.ip.empty());
+        if (m_maskItem)    m_maskItem->setValue(net.mask.empty() ? T(kUnknown) : net.mask, net.mask.empty());
+        if (m_gatewayItem) m_gatewayItem->setValue(net.gateway.empty() ? T(kUnknown) : net.gateway, net.gateway.empty());
+        if (m_dnsItem)     m_dnsItem->setValue(net.dns.empty() ? T(kUnknown) : net.dns, net.dns.empty());
         // Re-test
         if (m_retestItem) m_retestItem->setValue(testing ? T(kTesting) : "", true);
 
