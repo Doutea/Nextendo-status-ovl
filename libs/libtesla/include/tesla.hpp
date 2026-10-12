@@ -1989,11 +1989,32 @@ namespace tsl {
                 this->m_clearList = true;
             }
 
+            // Names the item the next requestFocus() should return.
+            void requestFocusOn(Element *item) {
+                this->m_focusRequested = item;
+            }
+
             virtual Element* requestFocus(Element *oldFocus, FocusDirection direction) override {
                 Element *newFocus = nullptr;
 
                 if (this->m_clearList || this->m_itemsToAdd.size() > 0)
                     return nullptr;
+
+                // Honour an explicitly requested item before the scan below, which
+                // would otherwise answer with the first row every time.
+                if (this->m_focusRequested != nullptr) {
+                    Element *wanted = this->m_focusRequested;
+                    this->m_focusRequested = nullptr;
+
+                    for (u16 i = 0; i < this->m_items.size(); i++) {
+                        if (this->m_items[i] != wanted)
+                            continue;
+
+                        this->m_focusedIndex = i;
+                        this->updateScrollOffset();
+                        return wanted;
+                    }
+                }
 
                 if (direction == FocusDirection::None) {
                     u16 i = 0;
@@ -2094,6 +2115,11 @@ namespace tsl {
         protected:
             std::vector<Element*> m_items;
             u16 m_focusedIndex = 0;
+            // An item the caller wants focused next. List::requestFocus cannot
+            // honour a specific element, because Gui::requestFocus forwards to it
+            // and it answers with whatever item it finds first, so a caller that
+            // knows which row it wants has to say so out of band.
+            Element* m_focusRequested = nullptr;
 
             float m_offset = 0, m_nextOffset = 0;
             s32 m_listHeight = 0;
