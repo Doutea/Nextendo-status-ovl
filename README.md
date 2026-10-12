@@ -16,32 +16,19 @@
 ## 功能
 
 - **总在线人数** —— 和官网状态页显示的数字一致
-- **游戏列表** —— 列出全部游戏服务器，按人数从多到少排列，一眼看出哪个最热闹
-- **中文游戏名** —— 英文原名过长的游戏会显示中文名
+- **游戏列表** —— 按人数从多到少排列，一眼看出哪个游戏最热闹
+- **中文游戏名** —— 游戏会显示中文名
 - **自动刷新** —— 面板打开时每 15 秒更新一次
 - **手动刷新** —— 选中「在线人数」按 **A** 立即刷新
-- **打开即显示** —— 记住上次的人数，下次打开立刻就有，不用等网络
+- **打开即显示** —— 记住上次的人数
 - **中英双语界面** —— 跟随主机系统语言自动切换
 
 ## 界面
 
-```
-┌──────────────────────────────┐
-│  Nextendo 在线状态            │
-│  更新于 14:32:07              │
-├──────────────────────────────┤
-│  当前状态                     │
-│  在线人数              47     │
-├──────────────────────────────┤
-│  游戏列表                     │
-│  Splatoon 3            12     │
-│  马力欧赛车 8           9     │
-│  超级马力欧 奥德赛       5     │
-│  ...                          │
-├──────────────────────────────┤
-│  B 返回            A 确定     │
-└──────────────────────────────┘
-```
+<p align="center">
+  <img src="assets/screenshot-zh.jpg" width="620">
+</p>
+
 
 ## 按键
 
@@ -79,7 +66,7 @@
 检查主机是否联网。网络不稳定时会保留旧数据，恢复后会自动更新。
 
 **游戏显示的是英文名？**
-新上线的游戏会先显示英文原名，中文名补充进去之后**会自动更新**，不需要重新下载安装。
+只有对照表里有的游戏才显示中文，新上线的游戏会先显示英文原名，后续版本会补充。
 
 ## 致谢与许可
 
@@ -98,12 +85,17 @@ leaving your game.
 ## Features
 
 - **Total players online**, from the same endpoint the website's status page uses
-- **Every game server listed**, busiest first
+- **Per-game breakdown**, busiest first
 - **Automatic refresh** every 15 seconds while the panel is open
 - **Manual refresh** by selecting **Players online** and pressing **A**
 - **Opens instantly** — the last known numbers are cached, so there is no wait
 - **Chinese and English interface**, chosen from the console's system language
-- **Chinese game names**, with the list updated online as new games appear
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshot-en.jpg" width="620">
+</p>
 
 ## Controls
 
