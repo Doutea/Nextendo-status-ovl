@@ -1401,7 +1401,10 @@ private:
         // must count as a change so the rows are rebuilt with the new label.
         std::vector<std::string> names;
         names.reserve(jeux.size());
-        for (const auto& j : jeux) names.push_back(localisedName(j.name, j.titleIds));
+        for (const auto& j : jeux) {
+            names.push_back((pinnedRank(j.name) >= 0 ? std::string("\u2605 ") : std::string()) +
+                            localisedName(j.name, j.titleIds));
+        }
 
         // Same games as before: refresh the numbers in place. That is the common
         // case and it leaves the selection alone.
@@ -1442,9 +1445,10 @@ private:
 
         m_rows.clear();
         for (const auto& j : jeux) {
-            // No marker on the name: a pinned game is simply at the top of the
-            // list, which is enough to tell it apart.
-            auto* item = new tsl::elm::ListItem(localisedName(j.name, j.titleIds));
+            const bool pinned = (pinnedRank(j.name) >= 0);
+            auto* item = new tsl::elm::ListItem(
+                (pinned ? std::string("\u2605 ") : std::string()) +
+                localisedName(j.name, j.titleIds));
             applyValueColour(item, std::to_string(j.players));
 
             // X pins this game to the top, or clears the pin if it is already
