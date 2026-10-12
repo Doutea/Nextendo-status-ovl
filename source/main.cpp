@@ -244,6 +244,8 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
 static std::map<std::string, std::string> g_cachedIpByHost;
 // Entries fetched from the repository, layered over the compiled-in table.
 static std::map<std::string, std::string> g_namesZhOverride;
+// The same entries keyed by normalised name; see normaliseName().
+static std::map<std::string, std::string> g_namesZhByNorm;
 static Mutex g_namesMutex;
 // When the last attempt was made, so a game that simply has no translation yet
 // does not cause a request on every poll.
@@ -1148,6 +1150,65 @@ static std::string normaliseName(const std::string& text) {
     return out;
 }
 
+// Chinese names indexed by title id, built from kSiteGames.
+//
+// kSiteGames knows every title id a game reports under, and its names are the keys
+// the table uses, so this is what covers a game the API has renamed or split: the
+// API name misses, but its title id does not.
+//
+// Built outside g_namesMutex: it reads the override table, which the polling
+// thread replaces, and taking the mutex here would mean reading it while holding
+// it from localisedName().
+static std::mutex g_idIndexMutex;
+static std::map<std::string, std::string> g_namesZhById;
+static bool g_namesZhByIdReady = false;
+
+static void ensureIdNameIndex() {
+    std::lock_guard<std::mutex> lock(g_idIndexMutex);
+    if (g_namesZhByIdReady) return;
+
+    std::map<std::string, std::string> fetched;
+    {
+        mutexLock(&g_namesMutex);
+        fetched = g_namesZhOverride;
+        mutexUnlock(&g_namesMutex);
+    }
+
+    std::map<std::string, std::string> byId;
+    for (const auto& game : kSiteGames) {
+        // A fetched translation wins over the compiled one.
+        auto name = fetched.find(game.name);
+        if (name != fetched.end()) {
+            for (const char* id : game.ids) {
+                if (id == nullptr) break;
+                byId[id] = name->second;
+            }
+            continue;
+        }
+
+        auto compiled = g_gameNamesZh.find(game.name);
+        if (compiled == g_gameNamesZh.end()) continue;
+        for (const char* id : game.ids) {
+            if (id == nullptr) break;
+            byId[id] = compiled->second;
+        }
+    }
+
+    g_namesZhById = std::move(byId);
+    g_namesZhByIdReady = true;
+}
+
+static std::string lookupByTitleId(const std::vector<std::string>& titleIds) {
+    ensureIdNameIndex();
+
+    std::lock_guard<std::mutex> lock(g_idIndexMutex);
+    for (const auto& id : titleIds) {
+        auto it = g_namesZhById.find(id);
+        if (it != g_namesZhById.end()) return it->second;
+    }
+    return std::string();
+}
+
 // Chinese name when the console is set to Chinese, otherwise the API's own name.
 // A non-Chinese console has no Chinese font loaded, and forcing a Chinese title on
 // it would be both unreadable and wrong for that player's locale.
@@ -1254,65 +1315,6 @@ static std::map<std::string, std::string> parseNamesTable(const std::string& tex
         if (!key.empty() && !value.empty()) table[key] = value;
     }
     return table;
-}
-
-// Chinese names indexed by title id, built from kSiteGames.
-//
-// kSiteGames knows every title id a game reports under, and its names are the keys
-// the table uses, so this is what covers a game the API has renamed or split: the
-// API name misses, but its title id does not.
-//
-// Built outside g_namesMutex: it reads the override table, which the polling
-// thread replaces, and taking the mutex here would mean reading it while holding
-// it from localisedName().
-static std::mutex g_idIndexMutex;
-static std::map<std::string, std::string> g_namesZhById;
-static bool g_namesZhByIdReady = false;
-
-static void ensureIdNameIndex() {
-    std::lock_guard<std::mutex> lock(g_idIndexMutex);
-    if (g_namesZhByIdReady) return;
-
-    std::map<std::string, std::string> fetched;
-    {
-        mutexLock(&g_namesMutex);
-        fetched = g_namesZhOverride;
-        mutexUnlock(&g_namesMutex);
-    }
-
-    std::map<std::string, std::string> byId;
-    for (const auto& game : kSiteGames) {
-        // A fetched translation wins over the compiled one.
-        auto name = fetched.find(game.name);
-        if (name != fetched.end()) {
-            for (const char* id : game.ids) {
-                if (id == nullptr) break;
-                byId[id] = name->second;
-            }
-            continue;
-        }
-
-        auto compiled = g_gameNamesZh.find(game.name);
-        if (compiled == g_gameNamesZh.end()) continue;
-        for (const char* id : game.ids) {
-            if (id == nullptr) break;
-            byId[id] = compiled->second;
-        }
-    }
-
-    g_namesZhById = std::move(byId);
-    g_namesZhByIdReady = true;
-}
-
-static std::string lookupByTitleId(const std::vector<std::string>& titleIds) {
-    ensureIdNameIndex();
-
-    std::lock_guard<std::mutex> lock(g_idIndexMutex);
-    for (const auto& id : titleIds) {
-        auto it = g_namesZhById.find(id);
-        if (it != g_namesZhById.end()) return it->second;
-    }
-    return std::string();
 }
 
 static void applyNamesTable(std::map<std::string, std::string> table) {
