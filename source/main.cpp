@@ -182,6 +182,8 @@ struct GameEntry {
 struct JeuEntry {
     std::string name;
     int players = 0;
+    // Title ids this game reports under, from the API's "titres" field.
+    std::vector<std::string> titleIds;
 };
 
 static std::vector<GameEntry> g_games;
@@ -316,7 +318,9 @@ static void saveCountsCache(const std::vector<JeuEntry>& jeux, u64 successTick) 
     std::string text;
     text += "fetched=" + std::to_string(armTicksToNs(successTick) / 1000000000ULL) + "\n";
     for (const auto& entry : jeux) {
-        text += std::to_string(entry.players) + "\t" + cacheEscape(entry.name) + "\n";
+        text += std::to_string(entry.players) + "\t" + cacheEscape(entry.name);
+        for (const auto& id : entry.titleIds) text += "\t" + cacheEscape(id);
+        text += "\n";
     }
 
     FsFileSystem fs{};
@@ -382,7 +386,24 @@ static void loadCountsCache() {
         if (tab == std::string::npos) continue;
         JeuEntry entry;
         entry.players = static_cast<int>(strtol(line.c_str(), nullptr, 10));
-        entry.name = cacheUnescape(line.substr(tab + 1));
+
+        // Tab-separated after the count: the name, then the game's title ids.
+        const std::string rest = line.substr(tab + 1);
+        size_t fieldStart = 0;
+        while (fieldStart <= rest.size()) {
+            const size_t nextTab = rest.find('\t', fieldStart);
+            const std::string field = rest.substr(
+                fieldStart,
+                (nextTab == std::string::npos ? rest.size() : nextTab) - fieldStart);
+            if (entry.name.empty()) {
+                entry.name = cacheUnescape(field);
+            } else if (!field.empty()) {
+                entry.titleIds.push_back(cacheUnescape(field));
+            }
+            if (nextTab == std::string::npos) break;
+            fieldStart = nextTab + 1;
+        }
+
         if (!entry.name.empty()) jeux.push_back(std::move(entry));
     }
 
@@ -452,27 +473,68 @@ static const SiteGame kSiteGames[] = {
     {"Monopoly for Nintendo Switch", {"01007430037f6000", nullptr, nullptr}},
 };
 
-// Builds the display list from the counts map.
+// Highest count across a set of title ids.
 //
-// A game's count is the highest across its title ids, not their sum: a title that
-// reports under several regional ids would otherwise be counted more than once.
-// This is exactly what the status page does, so the numbers agree with it.
-static std::vector<JeuEntry> buildGameList(const std::map<std::string, int>& counts) {
+// A game reporting under several regional ids must take the highest, not the sum,
+// or it would be counted more than once. This is what the status page does, so
+// the numbers agree with it.
+static int bestCountFor(const std::vector<std::string>& titles,
+                        const std::map<std::string, int>& counts) {
+    int best = 0;
+    for (const auto& id : titles) {
+        auto it = counts.find(id);
+        if (it != counts.end() && it->second > best) best = it->second;
+    }
+    return best;
+}
+
+// Builds the display list, with the API as the source of truth.
+//
+// This used to be built from kSiteGames alone, so a game the API started
+// reporting after that table was compiled could never show up - the list was only
+// ever as new as the table. The API's "jeux" array now carries the "titres" ids,
+// which was the only thing the table provided, so a new game appears as soon as
+// the API reports it, with no new build needed.
+//
+// kSiteGames is still consulted, but only to add games the response does not
+// mention at all. A game the API does mention is taken as given, even at zero
+// players: the API decides what to list, and filtering its entries would hide
+// titles the status page shows.
+static std::vector<JeuEntry> buildGameList(const std::vector<JeuEntry>& apiJeux,
+                                           const std::map<std::string, int>& counts) {
     std::vector<JeuEntry> out;
-    out.reserve(sizeof(kSiteGames) / sizeof(kSiteGames[0]));
+    out.reserve(apiJeux.size() + 8);
+
+    std::map<std::string, bool> seenIds;
+    for (const auto& game : apiJeux) {
+        out.push_back(game);
+        for (const auto& id : game.titleIds) seenIds[id] = true;
+    }
 
     for (const auto& game : kSiteGames) {
-        int best = 0;
+        bool present = false;
         for (const char* id : game.ids) {
             if (id == nullptr) break;
-            auto it = counts.find(id);
-            if (it != counts.end() && it->second > best) best = it->second;
+            if (seenIds.count(id) != 0) {
+                present = true;
+                break;
+            }
         }
+        if (present) continue;
+
+        std::vector<std::string> ids;
+        for (const char* id : game.ids) {
+            if (id == nullptr) break;
+            ids.push_back(id);
+        }
+
         JeuEntry entry;
         entry.name = game.name;
-        entry.players = best;
+        entry.players = bestCountFor(ids, counts);
+        entry.titleIds = std::move(ids);
         out.push_back(std::move(entry));
     }
+
     return out;
 }
 
@@ -630,6 +692,18 @@ std::vector<JeuEntry> parseJeux(const std::string& rawJson) {
             json_t* jjoueurs = json_object_get(value, "joueurs");
             if (json_is_string(jnom)) entry.name = json_string_value(jnom);
             if (json_is_integer(jjoueurs)) entry.players = (int)json_integer_value(jjoueurs);
+
+            // "titres" lists the title ids this game reports under. Reading it is
+            // what lets the list be driven by the API instead of a compiled table.
+            json_t* jtitres = json_object_get(value, "titres");
+            if (json_is_array(jtitres)) {
+                size_t ti;
+                json_t* tv;
+                json_array_foreach(jtitres, ti, tv) {
+                    if (json_is_string(tv)) entry.titleIds.emplace_back(json_string_value(tv));
+                }
+            }
+
             if (!entry.name.empty()) result.push_back(entry);
         }
     }
@@ -790,18 +864,17 @@ static void pollThreadFunc(void*) {
             std::string error;
             std::string raw = fetchCountsWithRetry(error);
             auto newCounts = parseOnlineCounts(raw);
+            auto apiJeux = parseJeux(raw);
 
-            // Only build the list when the fetch actually returned counts.
+            // Only build the list when the fetch returned something.
             //
             // buildGameList() always produces one entry per known game, so on a
-            // failed fetch it would hand back 35 zeroes. That is non-empty, which
+            // failed fetch it would hand back ~35 zeroes. That is non-empty, which
             // would defeat the "keep the last good numbers" check below and blank
             // the panel on every timeout.
             std::vector<JeuEntry> newJeux;
-            if (!newCounts.empty()) {
-                // Built from the counts map rather than the API's "jeux" array,
-                // which is capped at 30 entries and would hide the rest.
-                newJeux = buildGameList(newCounts);
+            if (!apiJeux.empty()) {
+                newJeux = buildGameList(apiJeux, newCounts);
             }
 
             if (!newJeux.empty()) {
