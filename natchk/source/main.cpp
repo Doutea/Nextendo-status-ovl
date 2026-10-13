@@ -16,6 +16,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <atomic>
 #include <vector>
 #include <string>
@@ -207,6 +208,57 @@ struct NatStatus {
 
 static NatStatus g_nat;
 static Mutex g_natMutex;
+// ---------------------------------------------------------------------------
+// Data directory
+//
+// sdmc:/switch/nextendo-status/ holds the caches (last_counts.txt, games_zh.txt,
+// pinned.txt, nat.txt). fsFsCreateFile() does not create parent directories, so
+// every write into that folder failed until the folder existed - which is why it
+// never appeared and nothing was ever cached.
+//
+// Must run after fsdevMountSdmc(), which is called from initServices().
+// ---------------------------------------------------------------------------
+
+static bool isDirectory(const std::string& path) {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return false;
+
+    FsDir dir{};
+    const bool ok = R_SUCCEEDED(fsFsOpenDirectory(&fs, path.c_str(),
+                                                  FsDirOpenMode_ReadDirs, &dir));
+    if (ok) fsDirClose(&dir);
+    fsFsClose(&fs);
+    return ok;
+}
+
+static void createDir(const std::string& path) {
+    // Raw fs API first: that is the one that works in an overlay process.
+    FsFileSystem fs{};
+    if (R_SUCCEEDED(fsOpenSdCardFileSystem(&fs))) {
+        fsFsCreateDirectory(&fs, path.c_str());   // no error when it already exists
+        fsFsClose(&fs);
+    }
+
+    // POSIX mkdir as a second opinion; harmless if it fails.
+    mkdir(path.c_str(), 0777);
+}
+
+// Retries, because a call right after the mount can fail while the filesystem is
+// still settling - a single attempt is what made the folder appear only sometimes.
+static void ensureDirectory(const std::string& path) {
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        createDir(path);
+        if (isDirectory(path)) return;
+        svcSleepThread(100'000'000LL);   // 100 ms
+    }
+}
+
+// Called from initServices() once the SD card is mounted, before any cache is
+// written or read.
+static void ensureDataDirs() {
+    ensureDirectory("/switch/nextendo-status");
+}
+
 static void saveNatCache(const NatStatus& status);
 static std::atomic<bool> g_natRequested{false};
 static std::atomic<bool> g_natTesting{false};
@@ -793,6 +845,7 @@ class NatCheckOverlay : public tsl::Overlay {
 public:
     virtual void initServices() override {
         fsdevMountSdmc();
+        ensureDataDirs();
         timeInitialize();
         nifmInitialize(NifmServiceType_User);
         socketInitialize(&socketConfig);
