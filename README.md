@@ -51,7 +51,7 @@
    sdmc:/switch/.overlays/nextendo-status.ovl
    ```
 
-3. 用快捷键呼出 overlay 菜单，选择 **Nextendo 在线状态**
+3. 用快捷键呼出 overlay 菜单，选择 **在线状态**
 
 ## 使用提示
 
@@ -62,7 +62,7 @@
 
 ## 常见问题
 
-**面板里没有「Nextendo 在线状态」？**
+**面板里没有「在线状态」？**
 确认 `nextendo-status.ovl` 放在 `sdmc:/switch/.overlays/` 目录下（不是子目录），然后重启一次 overlay 菜单或主机。
 
 **人数一直不更新？**
