@@ -1,4 +1,4 @@
-<h1 align="center">Nextendo 在线状态</h1>
+<h1 align="center">Nextendo Status Overlay</h1>
 
 <p align="center">
   <b>在 Switch 上直接查看 Nextendo Network 的在线人数</b><br>
