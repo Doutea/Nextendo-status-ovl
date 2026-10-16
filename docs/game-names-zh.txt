@@ -13,43 +13,44 @@
 #
 # Lines starting with # are ignored.
 
-Mario Kart 8 Deluxe                      | 马力欧赛车 8 豪华版
-Splatoon 2                               | 斯普拉遁 2
-Splatoon 3                               | 斯普拉遁 3
-Super Smash Bros. Ultimate               | 任天堂全明星大乱斗
-Animal Crossing: New Horizons            | 动物森友会
-Luigi's Mansion 3                        | 路易吉鬼屋 3
-Minecraft: Nintendo Switch Edition       | 我的世界：Switch 版
-ARMS                                     | ARMS
-Mario Tennis Aces                        | 马力欧网球 Aces
-Super Mario Maker 2                      | 超级马力欧制造 2
-PAC-MAN 99                               | 吃豆人 99
-Tetris 99                                | 俄罗斯方块 99
-Super Mario Bros. 35                     | 超级马力欧兄弟 35
-Super Mario Bros. Wonder                 | 超级马力欧兄弟 惊奇
-Clubhouse Games: 51 Worldwide Classics   | 世界游戏大全 51
-Monster Hunter Generations Ultimate      | 怪物猎人 XX
-Crash Team Racing Nitro-Fueled           | 古惑狼赛车重制版
-Diablo III: Eternal Collection           | 暗黑破坏神 III：永恒之战
-Mario Party Superstars                   | 马力欧派对 超级巨星
-Super Mario Party Jamboree               | 超级马力欧派对 空前盛会
-Overcooked! 2                            | 胡闹厨房 2
-Pokémon Scarlet and Violet               | 宝可梦 朱紫
-Nintendo 64 - Nintendo Classics          | Nintendo 64 经典合集
-Pokémon Legends: Z-A                     | 宝可梦传说 Z-A
-Mario Golf: Super Rush                   | 马力欧高尔夫：超级冲刺
-Super Mario 3D World + Bowser's Fury     | 超级马力欧 3D 世界
-Super Mario Odyssey                      | 超级马力欧 奥德赛
-METAL GEAR SOLID: Peace Walker           | 合金装备：和平行者
-Mario Strikers: Battle League            | 马力欧足球：超级洲际联赛
-Minecraft Dungeons II                    | 我的世界：地牢 II
-Pokkén Tournament DX                     | 宝可拳 DX
-Saints Row: The Third - The Full Package | 黑道圣徒 3：完整版
-Ultimate Chicken Horse                   | 超级鸡马
-Nintendo Switch Sports                   | Nintendo Switch 运动
-Monopoly for Nintendo Switch             | 地产大亨
-MONSTER HUNTER RISE                      | 怪物猎人：崛起
-Miitopia                                 | 迷托邦
-Zombie Army 4: Dead War                  | 僵尸部队 4：死亡战争
-Friday the 13th: The Game Ultimate Slasher Edition       | 十三号星期五：游戏版
-Stardew Valley                           | 星露谷物语
+Mario Kart 8 Deluxe                                | 马力欧赛车 8 豪华版
+Splatoon 2                                         | 斯普拉遁 2
+Splatoon 3                                         | 斯普拉遁 3
+Super Smash Bros. Ultimate                         | 任天堂全明星大乱斗
+Animal Crossing: New Horizons                      | 动物森友会
+Luigi's Mansion 3                                  | 路易吉鬼屋 3
+Minecraft: Nintendo Switch Edition                 | 我的世界：Switch 版
+ARMS                                               | ARMS
+Mario Tennis Aces                                  | 马力欧网球 Aces
+Super Mario Maker 2                                | 超级马力欧制造 2
+PAC-MAN 99                                         | 吃豆人 99
+Tetris 99                                          | 俄罗斯方块 99
+Super Mario Bros. 35                               | 超级马力欧兄弟 35
+Super Mario Bros. Wonder                           | 超级马力欧兄弟 惊奇
+Clubhouse Games: 51 Worldwide Classics             | 世界游戏大全 51
+Monster Hunter Generations Ultimate                | 怪物猎人 XX
+Crash Team Racing Nitro-Fueled                     | 古惑狼赛车重制版
+Diablo III: Eternal Collection                     | 暗黑破坏神 III：永恒之战
+Mario Party Superstars                             | 马力欧派对 超级巨星
+Super Mario Party Jamboree                         | 超级马力欧派对 空前盛会
+Overcooked! 2                                      | 胡闹厨房 2
+Pokémon Scarlet and Violet                         | 宝可梦 朱与紫
+Nintendo 64 - Nintendo Classics                    | Nintendo 64 经典合集
+Pokémon Legends: Z-A                               | 宝可梦传说 Z-A
+Mario Golf: Super Rush                             | 马力欧高尔夫：超级冲刺
+Super Mario 3D World + Bowser's Fury               | 超级马力欧 3D 世界
+Super Mario Odyssey                                | 超级马力欧 奥德赛
+METAL GEAR SOLID: Peace Walker                     | 合金装备：和平行者
+Mario Strikers: Battle League                      | 马力欧足球：超级洲际联赛
+Minecraft Dungeons II                              | 我的世界：地牢 II
+Pokkén Tournament DX                               | 宝可拳 DX
+Saints Row: The Third - The Full Package           | 黑道圣徒 3：完整版
+Ultimate Chicken Horse                             | 超级鸡马
+Nintendo Switch Sports                             | Nintendo Switch 运动
+Monopoly for Nintendo Switch                       | 地产大亨
+MONSTER HUNTER RISE                                | 怪物猎人：崛起
+Miitopia                                           | 迷托邦
+Zombie Army 4: Dead War                            | 僵尸部队 4：死亡战争
+Friday the 13th: The Game Ultimate Slasher Edition | 十三号星期五：游戏版
+Stardew Valley                                     | 星露谷物语
+Pokémon Sword and Shield                           | 宝可梦 剑与盾
