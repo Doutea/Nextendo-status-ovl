@@ -617,46 +617,177 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     return responseBuffer;
 }
 
-std::string fetchOnlineCounts(std::string& errorOut) {
-    return fetchUrl("https://nextendo.network/api/online-counts", "nextendo.network", NEXTENDO_FALLBACK_IPS, errorOut);
+// The per-game feeds that the aggregate document gets wrong or omits.
+//
+// Each one answers {"connected":N,"online":true}. The title id is what the number
+// is attached to, matching the ids in the "titres" arrays.
+struct GameStatFeed {
+    const char* slug;      // path under /game-stats/
+    const char* titleId;
+};
+
+static const GameStatFeed kGameStatFeeds[] = {
+    {"jamboree", "0100965017338000"},   // Super Mario Party Jamboree
+    {"stardew",  "0100e65002bb8000"},   // Stardew Valley
+    {"kirby",    "0100a8e016236000"},   // Kirby's Dream Buffet
+};
+
+// Reads {"connected":N,"online":true}. Returns -1 when the document does not say.
+//
+// "online" is treated as a veto only when it is present and false: a feed that
+// reports the game offline must not contribute a number, but a feed that omits the
+// flag is still allowed to give one.
+static int parseGameStatConnected(const std::string& rawJson) {
+    json_error_t error;
+    json_t* root = json_loads(rawJson.c_str(), 0, &error);
+    if (!root) return -1;
+
+    int value = -1;
+    json_t* online = json_object_get(root, "online");
+    json_t* connected = json_object_get(root, "connected");
+    const bool onlineOk = !json_is_boolean(online) || json_is_true(online);
+    if (onlineOk && json_is_integer(connected)) {
+        value = (int)json_integer_value(connected);
+    }
+
+    json_decref(root);
+    return value;
 }
 
-// Fetches the counts document, retrying a couple of times.
+// Performs one request on an already-initialised handle.
 //
-// The retry is for a transient failure, so the panel does not have to wait a
-// whole 15s poll interval for the next chance. Each attempt is short: the
-// address is already pinned by fetchUrl(), so there is no DNS stall to ride out,
-// and a long deadline would only keep a dead network on screen longer.
-std::string fetchCountsWithRetry(std::string& errorOut) {
-    static const int kAttempts = 3;
+// Only the URL and the sink change between calls, which is what lets libcurl keep
+// the connection: the resolve list is rebuilt per request because a successful
+// request records the address that served it.
+static bool performOnHandle(CURL* curl, const std::string& url,
+                            const std::string& host,
+                            const std::vector<std::string>& fallbackIps,
+                            std::string& responseBuffer, std::string& errorOut) {
+    responseBuffer.clear();
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
+    // Same deadlines as a standalone request: the address is pinned below, so
+    // there is no DNS stall to ride out.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
 
-    for (int attempt = 0; attempt < kAttempts; ++attempt) {
-        // Give up at once if the overlay is closing: exitServices() waits for
-        // this thread, and two more attempts could otherwise hold it for ~30s.
-        if (!g_threadRunning.load()) {
-            errorOut = "closing";
-            return std::string();
-        }
+    struct curl_slist* resolveList = nullptr;
 
-        std::string lastError;
-        const std::string body = fetchOnlineCounts(lastError);
+    const std::string cachedIp = g_cachedIpByHost.count(host)
+                                     ? g_cachedIpByHost[host]
+                                     : std::string();
 
-        if (!body.empty() && lastError.empty()) {
-            errorOut.clear();
-            return body;
-        }
+    if (!cachedIp.empty()) {
+        const std::string entry = host + ":443:" + cachedIp;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+    const std::string resolved = resolveHostToIp(host);
+    if (!resolved.empty() && resolved != cachedIp) {
+        const std::string entry = host + ":443:" + resolved;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
+    for (const auto& ip : fallbackIps) {
+        if (ip == cachedIp || ip == resolved) continue;
+        const std::string entry = host + ":443:" + ip;
+        resolveList = curl_slist_append(resolveList, entry.c_str());
+    }
 
-        // A transport error, or an empty body. Keep the message from the last
-        // attempt and try again unless this was the final one.
-        errorOut = lastError.empty() ? "empty response" : lastError;
+    curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
 
-        if (attempt + 1 < kAttempts) {
-            // Brief pause so a transient hiccup can clear.
-            svcSleepThread(250'000'000LL);  // 250 ms
+    const CURLcode res = curl_easy_perform(curl);
+
+    if (res == CURLE_OK) {
+        char* usedIp = nullptr;
+        if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
+            g_cachedIpByHost[host] = usedIp;
         }
     }
 
-    return std::string();
+    // Drop the reference before freeing, so the handle never points at freed
+    // memory when it is reused.
+    curl_easy_setopt(curl, CURLOPT_RESOLVE, (struct curl_slist*)nullptr);
+    if (resolveList) curl_slist_free_all(resolveList);
+
+    if (res != CURLE_OK) {
+        errorOut = curl_easy_strerror(res);
+        return false;
+    }
+
+    errorOut.clear();
+    return true;
+}
+
+// Fetches the counts document and then the three per-game feeds, all on one
+// handle so the connection is reused.
+//
+// The counts document keeps its retry policy; the feeds do not retry, because a
+// missing feed is not worth another round trip - the API's own number stands in.
+static void fetchRefreshBundle(std::string& countsBody, std::string& countsError,
+                               std::map<std::string, int>& gameStats) {
+    countsBody.clear();
+    countsError.clear();
+    gameStats.clear();
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        countsError = "curl_easy_init fallo";
+        return;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    // Keeps the session open between the requests below.
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+
+    const std::string host = "nextendo.network";
+
+    static const int kAttempts = 3;
+    for (int attempt = 0; attempt < kAttempts; ++attempt) {
+        // Give up at once if the overlay is closing: exitServices() waits for this
+        // thread, and more attempts could otherwise hold it for ~30s.
+        if (!g_threadRunning.load()) {
+            countsError = "closing";
+            break;
+        }
+
+        std::string err;
+        std::string body;
+        if (performOnHandle(curl, "https://" + host + "/api/online-counts",
+                            host, NEXTENDO_FALLBACK_IPS, body, err) &&
+            !body.empty()) {
+            countsBody = body;
+            countsError.clear();
+            break;
+        }
+
+        countsError = err.empty() ? "empty response" : err;
+        if (attempt + 1 < kAttempts) {
+            svcSleepThread(250'000'000LL);   // 250 ms
+        }
+    }
+
+    // Without the document there is nothing to attach the feeds to.
+    if (countsBody.empty()) {
+        curl_easy_cleanup(curl);
+        return;
+    }
+
+    for (const auto& feed : kGameStatFeeds) {
+        if (!g_threadRunning.load()) break;
+
+        const std::string url = "https://" + host + "/game-stats/" + feed.slug;
+        std::string err;
+        std::string body;
+        if (!performOnHandle(curl, url, host, NEXTENDO_FALLBACK_IPS, body, err)) continue;
+        if (body.empty()) continue;
+
+        const int connected = parseGameStatConnected(body);
+        if (connected >= 0) gameStats[feed.titleId] = connected;
+    }
+
+    curl_easy_cleanup(curl);
 }
 
 std::map<std::string, int> parseOnlineCounts(const std::string& rawJson) {
@@ -747,9 +878,16 @@ static void pollThreadFunc(void*) {
             if (requested) g_refreshing = true;
 
             std::string error;
-            std::string raw = fetchCountsWithRetry(error);
+            std::map<std::string, int> gameStats;
+            std::string raw;
+            fetchRefreshBundle(raw, error, gameStats);
+
             auto newCounts = parseOnlineCounts(raw);
             auto apiJeux = parseJeux(raw);
+
+            // Fold the per-game feeds in before the list is built, so the games
+            // that only exist in kSiteGames pick up their number as well.
+            for (const auto& stat : gameStats) newCounts[stat.first] = stat.second;
 
             // Only build the list when the fetch returned something.
             //
@@ -760,6 +898,19 @@ static void pollThreadFunc(void*) {
             std::vector<JeuEntry> newJeux;
             if (!apiJeux.empty()) {
                 newJeux = buildGameList(apiJeux, newCounts);
+
+                // The games the API names itself carry their own count, which
+                // buildGameList() copies straight through, so the feeds have to be
+                // applied to those rows a second time.
+                for (auto& game : newJeux) {
+                    for (const auto& id : game.titleIds) {
+                        const auto stat = gameStats.find(id);
+                        if (stat != gameStats.end()) {
+                            game.players = stat->second;
+                            break;
+                        }
+                    }
+                }
             }
 
             if (!newJeux.empty()) {
