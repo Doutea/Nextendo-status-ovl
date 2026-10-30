@@ -23,9 +23,6 @@ jobs:
       - name: Build main overlay
         run: bash scripts/build.sh
 
-      - name: Build NAT check overlay
-        run: bash scripts/build_natchk.sh
-
       - name: Upload main overlay
         uses: actions/upload-artifact@v4
         with:
@@ -33,18 +30,12 @@ jobs:
           path: nextendo-status.ovl
           if-no-files-found: error
 
-      - name: Upload NAT check overlay
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextendo-natchk-ovl
-          path: nextendo-natchk.ovl
-          if-no-files-found: error
-
+      # The NAT check overlay is no longer built or attached to releases. Its
+      # sources stay in natchk/ and scripts/build_natchk.sh still builds it by
+      # hand if it is ever wanted again.
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            nextendo-status.ovl
-            nextendo-natchk.ovl
+          files: nextendo-status.ovl
           generate_release_notes: true
