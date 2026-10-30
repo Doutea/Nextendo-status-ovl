@@ -156,6 +156,25 @@ static std::string accountError(const AccountResponse& r, bool login) {
     if (r.status == 429) return L("请求过于频繁，请稍后重试", "Too many requests; retry later");
     return L("服务器返回错误", "Server error") + std::string(" (HTTP ") + std::to_string(r.status) + ")";
 }
+// Writes the raw live response to the SD card so a parser failure can be
+// diagnosed from the actual bytes instead of from the message alone.
+static void dumpLiveBody(const char* what, const std::string& body) {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+
+    static const char* path = "/switch/nextendo-status/live-debug.json";
+    fsFsDeleteFile(&fs, path);
+    if (!body.empty() && R_SUCCEEDED(fsFsCreateFile(&fs, path, body.size(), 0))) {
+        FsFile file{};
+        if (R_SUCCEEDED(fsFsOpenFile(&fs, path, FsOpenMode_Write, &file))) {
+            fsFileWrite(&file, 0, body.data(), body.size(), FsWriteOption_Flush);
+            fsFileClose(&file);
+        }
+    }
+    fsFsClose(&fs);
+    (void)what;
+}
+
 // Called only by pollThreadFunc. Returns true when a queued action was processed.
 static bool serviceAccount() {
     g_accountWake = false;
@@ -199,8 +218,20 @@ static bool serviceAccount() {
         expired = r.transport && r.status == 401;
         if (r.transport && r.status == 200) {
             ok = nextendo::parseLive(r.body, false, games);
-            if (!ok) message = L("房间数据格式无效", "Invalid lobby data");
-        } else message = accountError(r, false);
+            if (!ok) {
+                // The parser failed, so keep the bytes for inspection.
+                dumpLiveBody("parse", r.body);
+                message = L("房间数据格式无效", "Invalid lobby data") +
+                          std::string(" (HTTP 200, ") + std::to_string(r.body.size()) + L(" 字节)", " bytes)");
+            } else if (games.empty()) {
+                // Parsed fine but named no games: that is a protocol mismatch too,
+                // not an empty roster, so it is worth keeping the body as well.
+                dumpLiveBody("empty", r.body);
+                message = L("房间数据为空", "Lobby data empty") +
+                          std::string(" (HTTP 200, ") + std::to_string(r.body.size()) + L(" 字节)", " bytes)");
+            }
+        } else message = accountError(r, false) +
+                         std::string(" (HTTP ") + std::to_string(r.status) + ")";
         // These games expose their detailed data on separate official feeds.
         if (!expired) for (const auto& feed : {std::pair<const char*, const char*>{"/game-stats/kirby-live", "0100a8e016236000"},
                                       {"/game-stats/uno-live", "0100b6e012ebe000"}}) {

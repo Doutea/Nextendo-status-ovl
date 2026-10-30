@@ -64,10 +64,16 @@ inline bool parseGame(json_t* obj, LiveGame& game) {
         game.titles.push_back(id);
     }
     if (game.titles.empty()) return false;
-    if (!json_is_array(json_object_get(obj, "players")) || !json_is_array(json_object_get(obj, "lobbies"))) return false;
-    game.roomsAvailable = !json_is_false(json_object_get(obj, "roomsAvailable"));
-    game.players = parsePlayers(json_object_get(obj, "players"));
+    // Both fields are optional. The server omits them for titles that publish no
+    // roster, and treating that as an error used to discard the whole document.
+    json_t* playersArray = json_object_get(obj, "players");
     json_t* rooms = json_object_get(obj, "lobbies");
+
+    // "nolist" is the flag the status page reads; "roomsAvailable" is kept as
+    // well in case the API sends it, but on its own it is never present.
+    const bool noList = json_is_true(json_object_get(obj, "nolist"));
+    game.roomsAvailable = !json_is_false(json_object_get(obj, "roomsAvailable")) && !noList;
+    game.players = parsePlayers(playersArray);
     if (json_is_array(rooms)) {
         for (size_t i = 0; i < std::min<size_t>(json_array_size(rooms), 64); ++i) {
             json_t* r = json_array_get(rooms, i);
@@ -81,7 +87,10 @@ inline bool parseGame(json_t* obj, LiveGame& game) {
 inline bool parseLive(const std::string& body, bool single, std::vector<LiveGame>& out) {
     if (body.size() > kMaxBody) return false;
     json_error_t err{};
-    json_t* root = json_loadb(body.data(), body.size(), JSON_REJECT_DUPLICATES, &err);
+    // No JSON_REJECT_DUPLICATES: a repeated key made the whole document fail to
+    // load, and jansson keeps the last value anyway. Nothing else in the overlay
+    // passes that flag.
+    json_t* root = json_loadb(body.data(), body.size(), 0, &err);
     if (!json_is_object(root)) { if (root) json_decref(root); return false; }
     std::vector<LiveGame> parsed;
     bool ok = true;
@@ -92,10 +101,11 @@ inline bool parseLive(const std::string& body, bool single, std::vector<LiveGame
     } else {
         json_t* games = json_object_get(root, "games");
         ok = json_is_array(games);
+        // Skip an entry that cannot be read rather than abandoning the document:
+        // one malformed row used to blank the entire roster.
         if (ok) for (size_t i = 0; i < std::min<size_t>(json_array_size(games), 64); ++i) {
             LiveGame game;
             if (parseGame(json_array_get(games, i), game)) parsed.push_back(std::move(game));
-            else { ok = false; break; }
         }
     }
     json_decref(root);
