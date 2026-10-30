@@ -337,13 +337,19 @@ private:
         // One focusable row per player. A single non-focusable block would save the
         // same space, but the list only scrolls while focus moves, so anything past
         // the fold became unreachable - which is exactly what happened.
-        //
-        // No self/friend tag: the endpoint never sends "you" or "friend" (checked
-        // across 92 players), and the activity text rides on the same line.
         for (const auto& player : players) {
             std::string line = player.name.empty() ? L("未命名玩家", "Unnamed player") : player.name;
             if (!player.activity.empty()) line += "  \u00b7  " + player.activity;
-            list->addItem(new CompactItem(line));
+
+            // The server tags the viewer's own entry and their friends. Only those
+            // rows carry the flag, so most responses look like it is never sent - it
+            // simply means nobody the account knows was online.
+            const char* tag = player.you ? L("自己", "You")
+                                         : player.friendPlayer ? L("好友", "Friend")
+                                                               : "";
+            auto* row = new CompactItem(line, tag);
+            if (*tag != '\0') row->setValueColor(tsl::style::color::ColorValueBlue);
+            list->addItem(row);
         }
     }
     void redraw() {
