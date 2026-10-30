@@ -15,7 +15,10 @@ struct AccountState {
     std::string token, login, password, message;
     std::vector<nextendo::LiveGame> games;
     AccountJob job = AccountJob::None;
-    bool busy = false, remember = false;
+    // There is no "remember me" control in the UI, so leaving this false meant the
+    // token was never written and every boot asked for the account again. The
+    // logout button still clears it, so a shared console can be signed out.
+    bool busy = false, remember = true;
     unsigned epoch = 0, revision = 1;
     u64 fetchedTick = 0, lastAttemptTick = 0;
 };
@@ -116,7 +119,14 @@ static bool accountEpochIsCurrent(unsigned epoch) {
 static int accountProgress(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     return context && accountEpochIsCurrent(*static_cast<unsigned*>(context)) ? 0 : 1;
 }
-struct AccountResponse { bool transport = false; long status = 0; std::string body; };
+struct AccountResponse {
+    bool transport = false;
+    long status = 0;
+    std::string body;
+    // curl's own message when transport is false; empty when the request went
+    // through. Without it a failure only ever read "network request failed".
+    std::string error;
+};
 static AccountResponse accountRequest(CURL* curl, const char* path,
                                      const std::string& token, unsigned epoch, const std::string* post = nullptr) {
     AccountResponse result;
@@ -138,9 +148,10 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, post ? static_cast<long>(post->size()) : 0L);
     if (!post) curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     // performOnHandle installs its own callback, so supply our bounded sink there.
-    std::string ignored;
+    // The deadlines are wider than the counts request: this document is bigger and
+    // carries a session, and a timeout here looked like a network failure.
     result.transport = performOnHandle(curl, std::string("https://nextendo.network") + path,
-        "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, ignored, true);
+        "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, result.error, true, 30L, 12L);
     if (result.transport) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, static_cast<struct curl_slist*>(nullptr));
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, static_cast<const char*>(nullptr));
@@ -149,7 +160,13 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     return result;
 }
 static std::string accountError(const AccountResponse& r, bool login) {
-    if (!r.transport) return L("网络请求失败，请重试", "Network request failed; retry");
+    if (!r.transport) {
+        // Show curl's reason: "Timeout was reached" and "Failure writing output"
+        // are the two that looked identical before.
+        std::string detail = L("网络请求失败", "Network request failed");
+        if (!r.error.empty()) detail += ": " + r.error;
+        return detail;
+    }
     if (r.status == 401) return login ? L("账号或密码错误", "Incorrect login or password")
         : L("登录已过期，请重新登录", "Session expired; sign in again");
     if (r.status == 403) return L("服务器拒绝访问，请到官网登录确认", "Access denied; check your account on the website");

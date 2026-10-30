@@ -6,7 +6,10 @@
 
 namespace nextendo {
 // Limits are shared by the parser and the UI; avatars are deliberately omitted.
-constexpr size_t kMaxBody = 96 * 1024;
+// A roster with many lobbies and long activity strings is legitimate, and
+// accountWrite() aborts the transfer once this is exceeded - which is
+// indistinguishable from a network failure on screen. Raised accordingly.
+constexpr size_t kMaxBody = 256 * 1024;
 struct Player {
     std::string name, activity;
     bool you = false, friendPlayer = false;

@@ -665,15 +665,17 @@ static bool performOnHandle(CURL* curl, const std::string& url,
                             const std::string& host,
                             const std::vector<std::string>& fallbackIps,
                             std::string& responseBuffer, std::string& errorOut,
-                            bool bounded = false) {
+                            bool bounded = false,
+                            long timeoutSeconds = 12L, long connectSeconds = 8L) {
     responseBuffer.clear();
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, bounded ? accountWrite : WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    // Same deadlines as a standalone request: the address is pinned below, so
-    // there is no DNS stall to ride out.
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 12L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 8L);
+    // The address is pinned below, so there is no DNS stall to ride out. The
+    // deadlines are parameters because the authenticated live document is much
+    // larger than the counts one and needs longer than the default.
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connectSeconds);
 
     struct curl_slist* resolveList = nullptr;
 
