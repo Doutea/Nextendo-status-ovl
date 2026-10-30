@@ -83,8 +83,9 @@ public:
 private:
     void redraw() {
         mutexLock(&g_mutex);
-        const bool loggedIn = !g_account.token.empty(), busy = g_account.busy, remembered = g_account.remember;
+        const bool loggedIn = !g_account.token.empty(), busy = g_account.busy;
         const std::string message = g_account.message;
+        const std::string userName = g_account.userName;
         m_revision = g_account.revision;
         mutexUnlock(&g_mutex);
         m_redraw = false;
@@ -108,13 +109,6 @@ private:
                 tsl::changeTo<AccountKeyboard>(m_draft, true); return true;
             });
             list->addItem(pass);
-            auto* remember = new tsl::elm::ListItem(L("记住登录", "Remember session"), m_draft->remember ? L("开", "On") : L("关", "Off"));
-            remember->setClickListener([this, busy](u64 keys) {
-                if (busy || !(keys & HidNpadButton_A)) return false;
-                m_draft->remember = !m_draft->remember; m_redraw = true; return true;
-            });
-            list->addItem(remember);
-            if (m_draft->remember) list->addItem(new tsl::elm::ListItem(L("登录凭证将保存到 SD 卡", "Session token will be saved to SD")));
             auto* submit = new tsl::elm::ListItem(L("登录", "Sign in"));
             submit->setClickListener([this](u64 keys) {
                 if (!(keys & HidNpadButton_A)) return false;
@@ -128,7 +122,9 @@ private:
                         ++g_account.epoch;
                         g_account.login = m_draft->login;
                         g_account.password = std::move(m_draft->password);
-                        g_account.remember = m_draft->remember;
+                        // No longer a choice: the session is always kept, and
+                        // 退出登录 is what removes it.
+                        g_account.remember = true;
                         g_account.message.clear();
                         g_account.busy = true;
                         g_account.job = AccountJob::Login;
@@ -141,7 +137,10 @@ private:
             });
             list->addItem(submit);
         } else {
-            list->addItem(new tsl::elm::ListItem(remembered ? L("登录凭证保存在 SD 卡", "Session saved on SD") : L("仅本次运行保持登录", "Session lasts until overlay exits")));
+            // Name the session: the page only had two rows before and said nothing
+            // about which account was signed in.
+            list->addItem(new tsl::elm::ListItem(L("账号", "Account"),
+                                                 userName.empty() ? L("读取中…", "Loading…") : userName));
             auto* logout = new tsl::elm::ListItem(L("退出登录", "Sign out"));
             logout->setClickListener([this](u64 keys) {
                 if (!(keys & HidNpadButton_A)) return false;
@@ -161,22 +160,161 @@ static void addAccountEntry(tsl::elm::List* list) {
     list->addItem(account);
 }
 
+// ---------------------------------------------------------------------------
+// Room labels
+//
+// The endpoint sends English state and mode labels (occasionally French). Only the
+// Chinese interface is translated; other languages keep the server text, which is
+// already English.
+// ---------------------------------------------------------------------------
+
+static std::string lobbyModeText(const std::string& mode) {
+    if (!g_useChinese || mode.empty()) return mode;
+
+    struct Entry { const char* key; const char* zh; };
+    static const Entry kModes[] = {
+        {"Worldwide", "全球"},
+        {"Regional", "地区"},
+        {"Elite Smash", "精英大乱斗"},
+        {"Quickplay", "快速对战"},
+        {"Lobby", "大厅"},
+        {"Public arena", "公开竞技场"},
+        {"PUBLIC", "公开"},
+        {"Match prive", "私人比赛"},
+        {"Island open (Dodo Code)", "岛屿开放（需要密码）"},
+        {"Quest", "任务"},
+    };
+
+    // Several labels carry a " · 1 vs 1" suffix; the base and the suffix are
+    // translated separately so the suffix need not be listed for every mode.
+    std::string base = mode;
+    std::string suffix;
+    const size_t sep = mode.find(" \u00b7 ");
+    if (sep != std::string::npos) {
+        base = mode.substr(0, sep);
+        suffix = mode.substr(sep + 3);
+    }
+
+    std::string out;
+    for (const auto& entry : kModes) {
+        if (base == entry.key) { out = entry.zh; break; }
+    }
+    if (out.empty()) {
+        // "Public game (type 0)" and similar: keep the readable head.
+        if (base.rfind("Public game", 0) == 0) out = "公开游戏";
+        else return mode;   // unknown label: show the server text unchanged
+    }
+
+    if (!suffix.empty()) {
+        // The suffixes in use: "Race" and "1 vs 1".
+        if (suffix == "1 vs 1") suffix = "1vs1";
+        else if (suffix == "Race") suffix = "竞速";
+        out += " \u00b7 " + suffix;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// A read-only stack of rows drawn at a custom pitch.
+//
+// ListItem pins itself to 70px in layout() and getHeight() is not virtual, so a
+// subclass cannot shorten it. A drawer can: setBoundaries() is public and List
+// reads the element's height back when it lays the list out.
+// ---------------------------------------------------------------------------
+
+// Shared row pitch for the compact lists.
+static constexpr s32 kCompactRowHeight = 34;
+
+// A ListItem drawn at the same pitch as the name list, but still selectable.
+//
+// ListItem pins itself to 70px in layout() and draws at getY()+45, so shortening a
+// row means overriding both. The members are protected, so the text and value are
+// reused as they are, and drawHighlight() still comes from Element - that is what
+// the list calls to outline the focused row, which is why this cannot simply be a
+// CustomDrawer.
+class CompactItem : public tsl::elm::ListItem {
+public:
+    CompactItem(const std::string& text, const std::string& value = "")
+        : tsl::elm::ListItem(text, value) {}
+
+    virtual void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
+        this->setBoundaries(this->getX(), this->getY(), this->getWidth(), kCompactRowHeight);
+    }
+
+    virtual void draw(tsl::gfx::Renderer* renderer) override {
+        renderer->drawRect(this->getX(), this->getY(), this->getWidth(), 1,
+                           tsl::style::color::ColorFrame);
+        renderer->drawRect(this->getX(), this->getBottomBound() - 1, this->getWidth(), 1,
+                           tsl::style::color::ColorFrame);
+
+        const s32 baseline = this->getY() + kCompactRowHeight - 7;
+
+        // Measure the value first so the label can be clipped before it runs under it.
+        u32 valueWidth = 0;
+        if (!this->m_value.empty()) {
+            const auto size = renderer->drawString(this->m_value.c_str(), false, 0, 0, 18,
+                                                   tsl::style::color::ColorTransparent);
+            valueWidth = size.first;
+        }
+
+        const s32 labelRoom = this->getWidth() - 40 - (valueWidth ? static_cast<s32>(valueWidth) + 20 : 0);
+        renderer->drawString(this->m_text.c_str(), false, this->getX() + 20, baseline, 20,
+                             tsl::style::color::ColorText, labelRoom);
+
+        if (!this->m_value.empty()) {
+            const tsl::Color colour =
+                this->m_valueColorSet
+                    ? this->m_valueColor
+                    : (this->m_faint ? tsl::style::color::ColorDescription
+                                     : tsl::style::color::ColorHighlight);
+            renderer->drawString(this->m_value.c_str(), false,
+                                 this->getX() + this->getWidth() - static_cast<s32>(valueWidth) - 20,
+                                 baseline, 18, colour);
+        }
+    }
+};
+
+class CompactList : public tsl::elm::CustomDrawer {
+public:
+    CompactList(const std::vector<std::string>& rows, s32 lineHeight)
+        : tsl::elm::CustomDrawer([rows, lineHeight](tsl::gfx::Renderer* r, s32 x, s32 y, s32 w, s32 h) {
+              s32 rowY = y;
+              for (const auto& text : rows) {
+                  if (rowY + lineHeight > y + h) break;
+                  r->drawString(text.c_str(), false, x + 20, rowY + lineHeight - 7, 20,
+                                tsl::style::color::ColorText);
+                  r->drawRect(x, rowY + lineHeight - 1, w, 1, tsl::style::color::ColorFrame);
+                  rowY += lineHeight;
+              }
+          }) {
+        this->setBoundaries(0, 0, 0, static_cast<s32>(rows.size()) * lineHeight);
+    }
+};
+
 class LiveGui : public tsl::Gui {
     std::string m_name;
     std::vector<std::string> m_ids;
+    // Total for this game, carried in from the counts list.
+    int m_players = 0;
     tsl::elm::OverlayFrame* m_frame = nullptr;
     unsigned m_revision = 0;
     int m_room = -1;
     bool m_redraw = true;
     u64 m_tick = 0;
 public:
-    LiveGui(std::string name, std::vector<std::string> ids) : m_name(std::move(name)), m_ids(std::move(ids)) {
+    LiveGui(std::string name, std::vector<std::string> ids, int players)
+        : m_name(std::move(name)), m_ids(std::move(ids)), m_players(players) {
         g_liveVisible = true;
         requestLive();
     }
     ~LiveGui() override { g_liveVisible = false; }
     tsl::elm::Element* createUI() override {
-        m_frame = new tsl::elm::OverlayFrame(m_name, L("A 选择房间 · X 刷新", "A Choose lobby · X Refresh"));
+        // The subtitle carries the game's total from the counts document - the
+        // same figure the main list shows. The live payload only names the players
+        // who publish themselves, so counting those would read lower.
+        const std::string subtitle = std::string(L("当前游戏 ", "")) + std::to_string(m_players) +
+                                     L(" 人在线", " online in this game");
+        m_frame = new tsl::elm::OverlayFrame(m_name, subtitle);
         redraw(); return m_frame;
     }
     void update() override {
@@ -192,12 +330,22 @@ public:
     }
 private:
     static void addPlayers(tsl::elm::List* list, const std::vector<nextendo::Player>& players) {
-        if (players.empty()) list->addItem(new tsl::elm::ListItem(L("服务器未返回玩家名单", "No player list returned")));
-        for (const auto& player : players) {
-            std::string tag = player.you ? L("自己", "You") : player.friendPlayer ? L("好友", "Friend") : "";
-            list->addItem(new tsl::elm::ListItem(player.name.empty() ? L("未命名玩家", "Unnamed player") : player.name, tag));
-            if (!player.activity.empty()) list->addItem(new tsl::elm::ListItem(player.activity));
+        if (players.empty()) {
+            list->addItem(new tsl::elm::ListItem(L("服务器未返回玩家名单", "No player list returned")));
+            return;
         }
+
+        // No self/friend tag: the endpoint sends name/avatar/color/lobby/activity
+        // and never "you" or "friend", so the tag was always empty. The activity
+        // text rides on the same line instead of taking a row of its own.
+        std::vector<std::string> rows;
+        rows.reserve(players.size());
+        for (const auto& player : players) {
+            std::string line = player.name.empty() ? L("未命名玩家", "Unnamed player") : player.name;
+            if (!player.activity.empty()) line += "  \u00b7  " + player.activity;
+            rows.push_back(std::move(line));
+        }
+        list->addItem(new CompactList(rows, kCompactRowHeight));
     }
     void redraw() {
         nextendo::LiveGame game;
@@ -220,16 +368,15 @@ private:
         } else {
             if (busy) list->addItem(new tsl::elm::ListItem(L("刷新房间中…", "Refreshing lobbies…")));
             if (!error.empty()) list->addItem(new tsl::elm::ListItem(error));
-            if (m_tick) {
-                const u64 age = armTicksToNs(armGetSystemTick() - m_tick) / 1000000000ULL;
-                list->addItem(new tsl::elm::ListItem(L("数据距本次刷新", "Snapshot age at refresh"), std::to_string(age) + L(" 秒", " s")));
-            }
             if (!found && !busy) list->addItem(new tsl::elm::ListItem(L("该游戏当前没有公开的房间或玩家详情", "No published lobby or player details for this game")));
             if (found && m_room >= 0 && static_cast<size_t>(m_room) < game.lobbies.size()) {
                 const auto& room = game.lobbies[m_room];
-                list->addItem(new tsl::elm::CategoryHeader(L("房间 ", "Lobby ") + std::to_string(m_room + 1)));
-                if (!room.mode.empty()) list->addItem(new tsl::elm::ListItem(room.mode));
-                list->addItem(new tsl::elm::ListItem(room.state, std::to_string(room.count) + (room.capacity ? "/" + std::to_string(room.capacity) : "")));
+                // The mode belongs in the heading, and the state and seat count say
+                // nothing the player list does not already show, so the two rows
+                // they used to occupy are gone.
+                std::string heading = L("房间 ", "Lobby ") + std::to_string(m_room + 1);
+                if (!room.mode.empty()) heading += " " + lobbyModeText(room.mode);
+                list->addItem(new tsl::elm::CategoryHeader(heading));
                 addPlayers(list, room.players);
             } else if (found) {
                 if (!game.roomsAvailable) list->addItem(new tsl::elm::ListItem(L("玩家在线；房间详情暂不可用", "Players online; room details unavailable")));
@@ -237,7 +384,7 @@ private:
                 if (game.lobbies.empty()) list->addItem(new tsl::elm::ListItem(L("当前没有公开房间", "No published lobbies")));
                 for (size_t i = 0; i < game.lobbies.size(); ++i) {
                     const auto& room = game.lobbies[i];
-                    auto* row = new tsl::elm::ListItem(L("房间 ", "Lobby ") + std::to_string(i + 1) + " " + room.mode,
+                    auto* row = new CompactItem(L("房间 ", "Lobby ") + std::to_string(i + 1) + " " + lobbyModeText(room.mode),
                         std::to_string(room.count) + (room.capacity ? "/" + std::to_string(room.capacity) : ""));
                     row->setClickListener([this, i](u64 keys) {
                         if (!(keys & HidNpadButton_A)) return false;
@@ -245,7 +392,7 @@ private:
                     });
                     list->addItem(row);
                 }
-                list->addItem(new tsl::elm::CategoryHeader(L("全部在线玩家", "All online players")));
+                list->addItem(new tsl::elm::CategoryHeader(L("在线玩家", "Online players")));
                 addPlayers(list, game.players);
             }
         }

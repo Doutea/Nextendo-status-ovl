@@ -18,6 +18,8 @@
 #include <cstdlib>
 #include <mutex>
 #include <cstring>
+// completeJson() lives here and performOnHandle() needs it.
+#include "live_model.hpp"
 
 // ---------------------------------------------------------------------------
 // Language handling
@@ -715,6 +717,14 @@ static bool performOnHandle(CURL* curl, const std::string& url,
     if (resolveList) curl_slist_free_all(resolveList);
 
     if (res != CURLE_OK) {
+        // The server can deliver the whole document and then leave the connection
+        // open without the terminating chunk, which surfaces here as a timeout even
+        // though every byte arrived. A closed JSON object is the payload we asked
+        // for, so keep it.
+        if (nextendo::completeJson(responseBuffer)) {
+            errorOut.clear();
+            return true;
+        }
         errorOut = curl_easy_strerror(res);
         return false;
     }
@@ -1606,7 +1616,6 @@ public:
             return false;
         });
         list->addItem(m_totalItem);
-        addAccountEntry(list);
 
         // The list itself. This heading also separates the two blocks.
         m_sectionHeader = new tsl::elm::CategoryHeader(T(kGameList));
@@ -1639,6 +1648,13 @@ public:
     virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState& touchPos,
                              HidAnalogStickState joyStickPosLeft,
                              HidAnalogStickState joyStickPosRight) override {
+        // The account page has no visible entry point by design: + opens it, and
+        // nothing on screen says so. The row it used to occupy cost a game slot,
+        // and it is only needed once per console.
+        if ((keysDown & HidNpadButton_Plus) != 0) {
+            tsl::changeTo<AccountGui>();
+            return true;
+        }
         return false;
     }
 
@@ -1711,7 +1727,6 @@ private:
         });
         list->addItem(total);
         m_totalItem = total;
-        addAccountEntry(list);
 
         auto* section = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(section);
@@ -1729,9 +1744,10 @@ private:
             // there. The name is captured by value: the row outlives the loop.
             const std::string gameName = j.name;
             const std::vector<std::string> titleIds = j.titleIds;
-            item->setClickListener([this, gameName, titleIds](u64 keys) {
+            const int gamePlayers = j.players;
+            item->setClickListener([this, gameName, titleIds, gamePlayers](u64 keys) {
                 if ((keys & HidNpadButton_A) != 0) {
-                    tsl::changeTo<LiveGui>(localisedName(gameName, titleIds), titleIds);
+                    tsl::changeTo<LiveGui>(localisedName(gameName, titleIds), titleIds, gamePlayers);
                     return true;
                 }
                 if ((keys & HidNpadButton_X) != 0) {

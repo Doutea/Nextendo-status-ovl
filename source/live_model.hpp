@@ -120,6 +120,33 @@ inline bool matches(const LiveGame& game, const std::vector<std::string>& ids) {
         if (std::find(game.titles.begin(), game.titles.end(), id) != game.titles.end()) return true;
     return false;
 }
+// Does the buffer hold a closed top-level JSON object?
+//
+// Needed because the live endpoint sends the entire document and then leaves the
+// connection open: curl reports a timeout although every byte arrived. Treating a
+// complete body as success is what makes the roster readable at all.
+inline bool completeJson(const std::string& body) {
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    bool started = false;
+    for (const char ch : body) {
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') inString = false;
+            continue;
+        }
+        if (ch == '"') inString = true;
+        else if (ch == '{') { ++depth; started = true; }
+        else if (ch == '}') {
+            --depth;
+            if (started && depth == 0) return true;
+        }
+    }
+    return false;
+}
+
 inline bool validToken(const std::string& token) {
     if (token.empty() || token.size() > 8192) return false;
     return std::all_of(token.begin(), token.end(), [](unsigned char c) { return c > 32 && c < 127; });

@@ -10,9 +10,11 @@ static void wipe(std::string& s) {
     for (size_t i = 0; i < s.size(); ++i) p[i] = 0;
     s.clear();
 }
-enum class AccountJob { None, Login, Refresh };
+enum class AccountJob { None, Login, Refresh, Identity };
 struct AccountState {
     std::string token, login, password, message;
+    // Display name from /api/me, shown on the account page.
+    std::string userName;
     std::vector<nextendo::LiveGame> games;
     AccountJob job = AccountJob::None;
     // There is no "remember me" control in the UI, so leaving this false meant the
@@ -68,6 +70,11 @@ static void loadSession() {
                 read == token.size() && nextendo::validToken(token)) {
                 g_account.token = std::move(token);
                 g_account.remember = true;
+                // One request at start-up so the account page can name the
+                // session instead of showing an empty page.
+                g_account.job = AccountJob::Identity;
+                g_account.busy = true;
+                g_accountWake = true;
             }
             wipe(token);
         }
@@ -90,6 +97,7 @@ static void logoutAccount() {
     mutexLock(&g_mutex);
     ++g_account.epoch; // invalidates a login/live response already in flight
     wipe(g_account.token);
+    g_account.userName.clear();
     wipe(g_account.password);
     g_account.login.clear();
     g_account.games.clear();
@@ -128,7 +136,9 @@ struct AccountResponse {
     std::string error;
 };
 static AccountResponse accountRequest(CURL* curl, const char* path,
-                                     const std::string& token, unsigned epoch, const std::string* post = nullptr) {
+                                     const std::string& token, unsigned epoch,
+                                     const std::string* post = nullptr,
+                                     long timeoutSeconds = 20L, long connectSeconds = 10L) {
     AccountResponse result;
     if (!accountEpochIsCurrent(epoch)) return result;
     struct curl_slist* headers = nullptr;
@@ -150,9 +160,26 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     // performOnHandle installs its own callback, so supply our bounded sink there.
     // The deadlines are wider than the counts request: this document is bigger and
     // carries a session, and a timeout here looked like a network failure.
+    // Give up a few seconds after the body stops growing. The live endpoint never
+    // closes its connection, so without this every request burns its whole
+    // deadline before returning anything.
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 3L);
+
     result.transport = performOnHandle(curl, std::string("https://nextendo.network") + path,
-        "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, result.error, true, 30L, 12L);
-    if (result.transport) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
+        "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, result.error, true,
+        timeoutSeconds, connectSeconds);
+
+    // Read the status unconditionally: when the transfer is cut short it still
+    // carries the real code, and "HTTP 0" was only ever a missing read.
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
+
+    // A complete document beats a transport error caused by the server not
+    // closing the connection.
+    if (!result.transport && result.status == 200 && nextendo::completeJson(result.body)) {
+        result.transport = true;
+        result.error.clear();
+    }
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, static_cast<struct curl_slist*>(nullptr));
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, static_cast<const char*>(nullptr));
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, static_cast<void*>(nullptr));
@@ -192,6 +219,31 @@ static void dumpLiveBody(const char* what, const std::string& body) {
     (void)what;
 }
 
+// Reads account.name (falling back to account.username) out of /api/me.
+static std::string parseIdentity(const std::string& body) {
+    json_error_t err{};
+    json_t* root = json_loadb(body.data(), body.size(), 0, &err);
+    if (!json_is_object(root)) {
+        if (root) json_decref(root);
+        return std::string();
+    }
+
+    std::string name;
+    json_t* account = json_object_get(root, "account");
+    if (json_is_object(account)) {
+        for (const char* key : {"name", "username"}) {
+            json_t* value = json_object_get(account, key);
+            if (json_is_string(value) && json_string_length(value) > 0) {
+                name.assign(json_string_value(value), json_string_length(value));
+                break;
+            }
+        }
+    }
+
+    json_decref(root);
+    return name;
+}
+
 // Called only by pollThreadFunc. Returns true when a queued action was processed.
 static bool serviceAccount() {
     g_accountWake = false;
@@ -208,6 +260,7 @@ static bool serviceAccount() {
     CURL* curl = curl_easy_init();
     bool ok = false, expired = false;
     std::string message;
+    std::string identity;
     std::vector<nextendo::LiveGame> games;
     if (!curl) message = L("无法创建网络请求", "Could not create request");
     else if (job == AccountJob::Login) {
@@ -228,9 +281,24 @@ static bool serviceAccount() {
             ok = nextendo::validToken(token);
             if (root) json_decref(root);
             if (!ok) message = L("登录响应无效，请重试", "Invalid sign-in response; retry");
+            // One extra request while the session is fresh, so the account page
+            // can name it without a second round trip later.
+            if (ok) {
+                AccountResponse me = accountRequest(curl, "/api/me", token, epoch, nullptr, 12L, 8L);
+                if (me.transport && me.status == 200) identity = parseIdentity(me.body);
+            }
         } else message = accountError(r, true);
         wipe(r.body);
+    } else if (job == AccountJob::Identity) {
+        AccountResponse r = accountRequest(curl, "/api/me", token, epoch, nullptr, 12L, 8L);
+        expired = r.transport && r.status == 401;
+        if (r.transport && r.status == 200) {
+            identity = parseIdentity(r.body);
+            ok = !identity.empty();
+            if (!ok) message = L("无法读取账号信息", "Could not read the account");
+        } else message = accountError(r, false);
     } else {
+        const u64 liveStart = armGetSystemTick();
         AccountResponse r = accountRequest(curl, "/api/status/live", token, epoch);
         expired = r.transport && r.status == 401;
         if (r.transport && r.status == 200) {
@@ -250,9 +318,14 @@ static bool serviceAccount() {
         } else message = accountError(r, false) +
                          std::string(" (HTTP ") + std::to_string(r.status) + ")";
         // These games expose their detailed data on separate official feeds.
-        if (!expired) for (const auto& feed : {std::pair<const char*, const char*>{"/game-stats/kirby-live", "0100a8e016236000"},
+        //
+        // Both are extras, and both cost another round trip. On a slow link the
+        // first request alone can take most of the deadline, so piling three more
+        // on top is what made the page look frozen; skip them unless it was quick.
+        const bool mainWasQuick = armTicksToNs(armGetSystemTick() - liveStart) < 15'000'000'000ULL;
+        if (!expired && mainWasQuick) for (const auto& feed : {std::pair<const char*, const char*>{"/game-stats/kirby-live", "0100a8e016236000"},
                                       {"/game-stats/uno-live", "0100b6e012ebe000"}}) {
-            AccountResponse extra = accountRequest(curl, feed.first, token, epoch);
+            AccountResponse extra = accountRequest(curl, feed.first, token, epoch, nullptr, 8L, 5L);
             std::vector<nextendo::LiveGame> replacement;
             if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, true, replacement)) {
                 games.erase(std::remove_if(games.begin(), games.end(), [&](const auto& g) {
@@ -261,7 +334,7 @@ static bool serviceAccount() {
                 ok = true;
             }
         }
-        if (!expired) {
+        if (!expired && mainWasQuick) {
             // The website routes these titles to the service catalog, even when
             // that source is unavailable; do not substitute a fictional roster.
             const std::vector<std::string> catalogTitles = {"0100d870045b6000", "01008d300c50c000", "0100c62011050000",
@@ -269,7 +342,8 @@ static bool serviceAccount() {
                 "01003fb00c5a8000", "0100227010460000"};
             games.erase(std::remove_if(games.begin(), games.end(), [&](const auto& g) {
                 return nextendo::matches(g, catalogTitles); }), games.end());
-            AccountResponse extra = accountRequest(curl, "/service-catalog/v1/status/live", token, epoch);
+            AccountResponse extra = accountRequest(curl, "/service-catalog/v1/status/live", token, epoch,
+                                                   nullptr, 8L, 5L);
             std::vector<nextendo::LiveGame> catalog;
             if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, false, catalog)) {
                 const size_t before = games.size();
@@ -281,8 +355,10 @@ static bool serviceAccount() {
     if (curl) curl_easy_cleanup(curl);
     wipe(password);
     mutexLock(&g_mutex);
-    if (epoch == g_account.epoch && g_threadRunning.load()) {
+    const bool current = (epoch == g_account.epoch && g_threadRunning.load());
+    if (current) {
         g_account.lastAttemptTick = armGetSystemTick();
+        if (!identity.empty()) g_account.userName = identity;
         if (job == AccountJob::Login && ok) {
             g_account.token = token;
             g_account.games.clear();
@@ -299,9 +375,12 @@ static bool serviceAccount() {
             persistSession("");
         }
         g_account.message = message;
-        g_account.busy = false;
-        ++g_account.revision;
     }
+    // Cleared outside the epoch test on purpose. A logout while a request was in
+    // flight bumped the epoch, and leaving the flag set pinned the page on
+    // "refreshing" for the rest of the session.
+    g_account.busy = false;
+    ++g_account.revision;
     mutexUnlock(&g_mutex);
     wipe(token);
     return true;
