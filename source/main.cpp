@@ -148,6 +148,7 @@ static std::atomic<bool> g_overlayVisible{false};
 static std::atomic<bool> g_threadRunning{false};
 
 static Thread g_pollThread;
+static bool g_pollThreadStarted = false;
 // Stack for the polling thread.
 //
 // The upstream value was 0x4000 (16 KB). That thread performs DNS resolution, a
@@ -659,13 +660,15 @@ static int parseGameStatConnected(const std::string& rawJson) {
 // Only the URL and the sink change between calls, which is what lets libcurl keep
 // the connection: the resolve list is rebuilt per request because a successful
 // request records the address that served it.
+static size_t accountWrite(void*, size_t, size_t, void*);
 static bool performOnHandle(CURL* curl, const std::string& url,
                             const std::string& host,
                             const std::vector<std::string>& fallbackIps,
-                            std::string& responseBuffer, std::string& errorOut) {
+                            std::string& responseBuffer, std::string& errorOut,
+                            bool bounded = false) {
     responseBuffer.clear();
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, bounded ? accountWrite : WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
     // Same deadlines as a standalone request: the address is pinned below, so
     // there is no DNS stall to ride out.
@@ -718,6 +721,8 @@ static bool performOnHandle(CURL* curl, const std::string& url,
     return true;
 }
 
+#include "account.hpp"
+
 // Fetches the counts document and then the three per-game feeds, all on one
 // handle so the connection is reused.
 //
@@ -745,6 +750,7 @@ static void fetchRefreshBundle(std::string& countsBody, std::string& countsError
 
     static const int kAttempts = 3;
     for (int attempt = 0; attempt < kAttempts; ++attempt) {
+        if (g_accountWake.load()) serviceAccount();
         // Give up at once if the overlay is closing: exitServices() waits for this
         // thread, and more attempts could otherwise hold it for ~30s.
         if (!g_threadRunning.load()) {
@@ -775,6 +781,7 @@ static void fetchRefreshBundle(std::string& countsBody, std::string& countsError
     }
 
     for (const auto& feed : kGameStatFeeds) {
+        if (g_accountWake.load()) serviceAccount();
         if (!g_threadRunning.load()) break;
 
         const std::string url = "https://" + host + "/game-stats/" + feed.slug;
@@ -871,10 +878,13 @@ static void pollThreadFunc(void*) {
     // which has no entry point since the panel was reworked, so the request was
     // pure overhead: a GitHub fetch and an SD-card write on every open.
 
+    u64 lastCountsTick = 0;
     while (g_threadRunning.load()) {
+        serviceAccount();
         const bool requested = g_refreshRequested.exchange(false);
 
-        if (g_overlayVisible.load() || requested) {
+        if (requested || (g_overlayVisible.load() &&
+            (lastCountsTick == 0 || armTicksToNs(armGetSystemTick() - lastCountsTick) >= 15'000'000'000ULL))) {
             if (requested) g_refreshing = true;
 
             std::string error;
@@ -933,16 +943,26 @@ static void pollThreadFunc(void*) {
 
             // A game with no translation is the signal to pull the current table
             // from the repository.
+            if (g_accountWake.load()) serviceAccount();
             maybeRefreshNames(newJeux);
 
             g_refreshing = false;
             g_manualRefresh = false;
             g_dirty = true;
+            lastCountsTick = armGetSystemTick();
         }
 
-        for (int i = 0; i < 15 && g_threadRunning.load(); i++) {
-            svcSleepThread(1'000'000'000LL);
-            if (g_refreshRequested.load()) break;
+        mutexLock(&g_mutex);
+        const bool liveDue = g_overlayVisible.load() && g_liveVisible.load() && !g_account.token.empty() &&
+            !g_account.busy && (g_account.lastAttemptTick == 0 ||
+            armTicksToNs(armGetSystemTick() - g_account.lastAttemptTick) >= 15'000'000'000ULL);
+        mutexUnlock(&g_mutex);
+        if (liveDue) requestLive();
+
+        for (int i = 0; i < 10 && g_threadRunning.load(); i++) {
+            if (g_refreshRequested.load() || g_accountWake.load()) break;
+            svcSleepThread(100'000'000LL);
+            if (g_refreshRequested.load() || g_accountWake.load()) break;
         }
     }
 }
@@ -1548,6 +1568,8 @@ static void loadPinnedGame() {
     }
 }
 
+#include "account_gui.hpp"
+
 class GuiTest : public tsl::Gui {
 public:
     // No I/O here: fetching in the constructor is what made the panel take
@@ -1582,6 +1604,7 @@ public:
             return false;
         });
         list->addItem(m_totalItem);
+        addAccountEntry(list);
 
         // The list itself. This heading also separates the two blocks.
         m_sectionHeader = new tsl::elm::CategoryHeader(T(kGameList));
@@ -1686,6 +1709,7 @@ private:
         });
         list->addItem(total);
         m_totalItem = total;
+        addAccountEntry(list);
 
         auto* section = new tsl::elm::CategoryHeader(T(kGameList));
         list->addItem(section);
@@ -1702,7 +1726,12 @@ private:
             // X pins this game to the top, or clears the pin if it is already
             // there. The name is captured by value: the row outlives the loop.
             const std::string gameName = j.name;
-            item->setClickListener([this, gameName](u64 keys) {
+            const std::vector<std::string> titleIds = j.titleIds;
+            item->setClickListener([this, gameName, titleIds](u64 keys) {
+                if ((keys & HidNpadButton_A) != 0) {
+                    tsl::changeTo<LiveGui>(localisedName(gameName, titleIds), titleIds);
+                    return true;
+                }
                 if ((keys & HidNpadButton_X) != 0) {
                     applyPin(gameName);
                     return true;
@@ -1854,6 +1883,7 @@ public:
         // The mutex must exist before anything locks it: the cache loader below
         // takes g_mutex.
         mutexInit(&g_mutex);
+        loadSession();
 
         // Put the last known numbers on screen straight away. A fetch on this
         // console can take 8-20s, so without this the panel sits empty.
@@ -1869,13 +1899,26 @@ public:
         // waiting out a request.
 
         g_threadRunning = true;
-        threadCreate(&g_pollThread, pollThreadFunc, nullptr, g_threadStack, sizeof(g_threadStack), 0x2C, -2);
-        threadStart(&g_pollThread);
+        Result rc = threadCreate(&g_pollThread, pollThreadFunc, nullptr, g_threadStack, sizeof(g_threadStack), 0x2C, -2);
+        if (R_SUCCEEDED(rc)) {
+            rc = threadStart(&g_pollThread);
+            g_pollThreadStarted = R_SUCCEEDED(rc);
+            if (!g_pollThreadStarted) threadClose(&g_pollThread);
+        }
+        if (!g_pollThreadStarted) {
+            g_threadRunning = false;
+            g_lastError = L("后台网络服务启动失败", "Network worker failed to start");
+            g_dirty = true;
+        }
     }
     virtual void exitServices() override {
         g_threadRunning = false;
-        threadWaitForExit(&g_pollThread);
-        threadClose(&g_pollThread);
+        if (g_pollThreadStarted) {
+            threadWaitForExit(&g_pollThread);
+            threadClose(&g_pollThread);
+        }
+        wipe(g_account.password);
+        wipe(g_account.token);
 
         curl_global_cleanup();
         socketExit();

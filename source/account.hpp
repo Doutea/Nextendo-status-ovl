@@ -1,0 +1,260 @@
+#pragma once
+#include "live_model.hpp"
+
+// Included after performOnHandle(): all HTTPS work stays on the existing worker.
+static const char* kSessionPath = "/switch/nextendo-status/session.txt";
+static const char* kSessionTemp = "/switch/nextendo-status/session.tmp";
+static const char* L(const char* zh, const char* en) { return g_useChinese ? zh : en; }
+static void wipe(std::string& s) {
+    volatile char* p = s.empty() ? nullptr : &s[0];
+    for (size_t i = 0; i < s.size(); ++i) p[i] = 0;
+    s.clear();
+}
+enum class AccountJob { None, Login, Refresh };
+struct AccountState {
+    std::string token, login, password, message;
+    std::vector<nextendo::LiveGame> games;
+    AccountJob job = AccountJob::None;
+    bool busy = false, remember = false;
+    unsigned epoch = 0, revision = 1;
+    u64 fetchedTick = 0, lastAttemptTick = 0;
+};
+static AccountState g_account; // protected by g_mutex, including file writes
+static std::atomic<bool> g_accountWake{false}, g_liveVisible{false};
+
+static bool persistSession(const std::string& token) {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return false;
+    fsFsDeleteFile(&fs, kSessionTemp);
+    if (token.empty()) {
+        const Result rc = fsFsDeleteFile(&fs, kSessionPath);
+        // A missing file is already logged out; do not re-create it.
+        FsFile check{};
+        const bool absent = R_FAILED(fsFsOpenFile(&fs, kSessionPath, FsOpenMode_Read, &check));
+        if (!absent) fsFileClose(&check);
+        fsFsClose(&fs);
+        return R_SUCCEEDED(rc) || absent;
+    }
+    bool ok = false;
+    if (R_SUCCEEDED(fsFsCreateFile(&fs, kSessionTemp, token.size(), 0))) {
+        FsFile file{};
+        if (R_SUCCEEDED(fsFsOpenFile(&fs, kSessionTemp, FsOpenMode_Write, &file))) {
+            ok = R_SUCCEEDED(fsFileWrite(&file, 0, token.data(), token.size(), FsWriteOption_Flush));
+            fsFileClose(&file);
+        }
+        if (ok) {
+            fsFsDeleteFile(&fs, kSessionPath);
+            ok = R_SUCCEEDED(fsFsRenameFile(&fs, kSessionTemp, kSessionPath));
+        }
+    }
+    if (!ok) fsFsDeleteFile(&fs, kSessionTemp);
+    fsFsClose(&fs);
+    return ok;
+}
+static void loadSession() {
+    FsFileSystem fs{};
+    if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
+    fsFsDeleteFile(&fs, kSessionTemp);
+    FsFile file{};
+    if (R_SUCCEEDED(fsFsOpenFile(&fs, kSessionPath, FsOpenMode_Read, &file))) {
+        s64 size = 0;
+        if (R_SUCCEEDED(fsFileGetSize(&file, &size)) && size > 0 && size <= 8192) {
+            std::string token(static_cast<size_t>(size), '\0');
+            u64 read = 0;
+            if (R_SUCCEEDED(fsFileRead(&file, 0, token.data(), token.size(), FsReadOption_None, &read)) &&
+                read == token.size() && nextendo::validToken(token)) {
+                g_account.token = std::move(token);
+                g_account.remember = true;
+            }
+            wipe(token);
+        }
+        fsFileClose(&file);
+    }
+    fsFsClose(&fs);
+}
+static void requestLive() {
+    mutexLock(&g_mutex);
+    if (!g_account.token.empty() && !g_account.busy) {
+        g_account.job = AccountJob::Refresh;
+        g_account.busy = true;
+        g_account.message.clear();
+        ++g_account.revision;
+        g_accountWake = true;
+    }
+    mutexUnlock(&g_mutex);
+}
+static void logoutAccount() {
+    mutexLock(&g_mutex);
+    ++g_account.epoch; // invalidates a login/live response already in flight
+    wipe(g_account.token);
+    wipe(g_account.password);
+    g_account.login.clear();
+    g_account.games.clear();
+    g_account.fetchedTick = 0;
+    g_account.job = AccountJob::None;
+    g_account.busy = false;
+    g_account.message = persistSession("") ? L("已退出登录", "Signed out")
+        : L("已退出；请手动删除 SD 卡 session.txt", "Signed out; delete session.txt on SD");
+    ++g_account.revision;
+    mutexUnlock(&g_mutex);
+    g_accountWake = true;
+}
+static size_t accountWrite(void* data, size_t size, size_t count, void* user) {
+    auto* body = static_cast<std::string*>(user);
+    if (size && count > nextendo::kMaxBody / size) return 0;
+    const size_t n = size * count;
+    if (n > nextendo::kMaxBody - body->size()) return 0;
+    body->append(static_cast<char*>(data), n);
+    return n;
+}
+static bool accountEpochIsCurrent(unsigned epoch) {
+    mutexLock(&g_mutex);
+    const bool current = epoch == g_account.epoch && g_threadRunning.load();
+    mutexUnlock(&g_mutex);
+    return current;
+}
+static int accountProgress(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return context && accountEpochIsCurrent(*static_cast<unsigned*>(context)) ? 0 : 1;
+}
+struct AccountResponse { bool transport = false; long status = 0; std::string body; };
+static AccountResponse accountRequest(CURL* curl, const char* path,
+                                     const std::string& token, unsigned epoch, const std::string* post = nullptr) {
+    AccountResponse result;
+    if (!accountEpochIsCurrent(epoch)) return result;
+    struct curl_slist* headers = nullptr;
+    headers = curl_slist_append(headers, "X-Nextendo-Client-Id: nxc_hvGUwjpszrDT");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    if (!token.empty()) headers = curl_slist_append(headers, ("Authorization: Bearer " + token).c_str());
+    if (post) headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, accountProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &epoch);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post ? post->c_str() : nullptr);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, post ? static_cast<long>(post->size()) : 0L);
+    if (!post) curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    // performOnHandle installs its own callback, so supply our bounded sink there.
+    std::string ignored;
+    result.transport = performOnHandle(curl, std::string("https://nextendo.network") + path,
+        "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, ignored, true);
+    if (result.transport) curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &result.status);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, static_cast<struct curl_slist*>(nullptr));
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, static_cast<const char*>(nullptr));
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, static_cast<void*>(nullptr));
+    curl_slist_free_all(headers);
+    return result;
+}
+static std::string accountError(const AccountResponse& r, bool login) {
+    if (!r.transport) return L("网络请求失败，请重试", "Network request failed; retry");
+    if (r.status == 401) return login ? L("账号或密码错误", "Incorrect login or password")
+        : L("登录已过期，请重新登录", "Session expired; sign in again");
+    if (r.status == 403) return L("服务器拒绝访问，请到官网登录确认", "Access denied; check your account on the website");
+    if (r.status == 429) return L("请求过于频繁，请稍后重试", "Too many requests; retry later");
+    return L("服务器返回错误", "Server error") + std::string(" (HTTP ") + std::to_string(r.status) + ")";
+}
+// Called only by pollThreadFunc. Returns true when a queued action was processed.
+static bool serviceAccount() {
+    g_accountWake = false;
+    mutexLock(&g_mutex);
+    const AccountJob job = g_account.job;
+    if (job == AccountJob::None) { mutexUnlock(&g_mutex); return false; }
+    const unsigned epoch = g_account.epoch;
+    g_account.lastAttemptTick = armGetSystemTick();
+    std::string token = g_account.token, login = g_account.login;
+    std::string password = std::move(g_account.password);
+    g_account.job = AccountJob::None;
+    mutexUnlock(&g_mutex);
+
+    CURL* curl = curl_easy_init();
+    bool ok = false, expired = false;
+    std::string message;
+    std::vector<nextendo::LiveGame> games;
+    if (!curl) message = L("无法创建网络请求", "Could not create request");
+    else if (job == AccountJob::Login) {
+        json_t* obj = json_pack("{s:s,s:s}", "login", login.c_str(), "password", password.c_str());
+        char* dumped = obj ? json_dumps(obj, JSON_COMPACT) : nullptr;
+        std::string post = dumped ? dumped : "";
+        if (dumped) { volatile char* p = dumped; for (size_t i = 0; i < post.size(); ++i) p[i] = 0; free(dumped); }
+        if (obj) json_decref(obj);
+        wipe(password);
+        AccountResponse r;
+        if (!post.empty()) r = accountRequest(curl, "/api/login", "", epoch, &post);
+        wipe(post);
+        if (r.transport && r.status >= 200 && r.status < 300) {
+            json_error_t err{};
+            json_t* root = json_loadb(r.body.data(), r.body.size(), JSON_REJECT_DUPLICATES, &err);
+            json_t* value = json_object_get(root, "token");
+            if (json_is_string(value)) token.assign(json_string_value(value), json_string_length(value));
+            ok = nextendo::validToken(token);
+            if (root) json_decref(root);
+            if (!ok) message = L("登录响应无效，请重试", "Invalid sign-in response; retry");
+        } else message = accountError(r, true);
+        wipe(r.body);
+    } else {
+        AccountResponse r = accountRequest(curl, "/api/status/live", token, epoch);
+        expired = r.transport && r.status == 401;
+        if (r.transport && r.status == 200) {
+            ok = nextendo::parseLive(r.body, false, games);
+            if (!ok) message = L("房间数据格式无效", "Invalid lobby data");
+        } else message = accountError(r, false);
+        // These games expose their detailed data on separate official feeds.
+        if (!expired) for (const auto& feed : {std::pair<const char*, const char*>{"/game-stats/kirby-live", "0100a8e016236000"},
+                                      {"/game-stats/uno-live", "0100b6e012ebe000"}}) {
+            AccountResponse extra = accountRequest(curl, feed.first, token, epoch);
+            std::vector<nextendo::LiveGame> replacement;
+            if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, true, replacement)) {
+                games.erase(std::remove_if(games.begin(), games.end(), [&](const auto& g) {
+                    return nextendo::matches(g, {feed.second}); }), games.end());
+                games.insert(games.end(), replacement.begin(), replacement.end());
+                ok = true;
+            }
+        }
+        if (!expired) {
+            // The website routes these titles to the service catalog, even when
+            // that source is unavailable; do not substitute a fictional roster.
+            const std::vector<std::string> catalogTitles = {"0100d870045b6000", "01008d300c50c000", "0100c62011050000",
+                "010012f017576000", "0100b3c014bda000", "0100ea6014bb8000", "0100fcf002a58000", "0100ab401f136000",
+                "01003fb00c5a8000", "0100227010460000"};
+            games.erase(std::remove_if(games.begin(), games.end(), [&](const auto& g) {
+                return nextendo::matches(g, catalogTitles); }), games.end());
+            AccountResponse extra = accountRequest(curl, "/service-catalog/v1/status/live", token, epoch);
+            std::vector<nextendo::LiveGame> catalog;
+            if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, false, catalog)) {
+                const size_t before = games.size();
+                for (auto& game : catalog) if (game.titles.size() == 1 && nextendo::matches(game, catalogTitles)) games.push_back(std::move(game));
+                if (games.size() > before) ok = true;
+            }
+        }
+    }
+    if (curl) curl_easy_cleanup(curl);
+    wipe(password);
+    mutexLock(&g_mutex);
+    if (epoch == g_account.epoch && g_threadRunning.load()) {
+        g_account.lastAttemptTick = armGetSystemTick();
+        if (job == AccountJob::Login && ok) {
+            g_account.token = token;
+            g_account.games.clear();
+            g_account.fetchedTick = 0;
+            const bool saved = persistSession(g_account.remember ? token : "");
+            message = saved ? L("登录成功", "Signed in") : L("登录成功，但无法保存凭证", "Signed in; could not save session");
+        } else if (job == AccountJob::Refresh && ok) {
+            g_account.games = std::move(games);
+            g_account.fetchedTick = armGetSystemTick();
+        } else if (expired) {
+            wipe(g_account.token);
+            g_account.games.clear();
+            g_account.fetchedTick = 0;
+            persistSession("");
+        }
+        g_account.message = message;
+        g_account.busy = false;
+        ++g_account.revision;
+    }
+    mutexUnlock(&g_mutex);
+    wipe(token);
+    return true;
+}
