@@ -15,6 +15,10 @@ struct AccountState {
     std::string token, login, password, message;
     // Display name from /api/me, shown on the account page.
     std::string userName;
+    // Set by logoutAccount so the page can say "已退出登录" until the next sign-in.
+    bool signedOut = false;
+    // Title ids of the game being viewed; only those are kept from the response.
+    std::vector<std::string> wanted;
     std::vector<nextendo::LiveGame> games;
     AccountJob job = AccountJob::None;
     // There is no "remember me" control in the UI, so leaving this false meant the
@@ -82,8 +86,9 @@ static void loadSession() {
     }
     fsFsClose(&fs);
 }
-static void requestLive() {
+static void requestLive(const std::vector<std::string>& only = {}) {
     mutexLock(&g_mutex);
+    g_account.wanted = only;
     if (!g_account.token.empty() && !g_account.busy) {
         g_account.job = AccountJob::Refresh;
         g_account.busy = true;
@@ -98,6 +103,7 @@ static void logoutAccount() {
     ++g_account.epoch; // invalidates a login/live response already in flight
     wipe(g_account.token);
     g_account.userName.clear();
+    g_account.signedOut = true;
     wipe(g_account.password);
     g_account.login.clear();
     g_account.games.clear();
@@ -254,6 +260,8 @@ static bool serviceAccount() {
     g_account.lastAttemptTick = armGetSystemTick();
     std::string token = g_account.token, login = g_account.login;
     std::string password = std::move(g_account.password);
+    // Copied under the lock: the UI thread writes this when a page opens.
+    const std::vector<std::string> wanted = g_account.wanted;
     g_account.job = AccountJob::None;
     mutexUnlock(&g_mutex);
 
@@ -302,7 +310,10 @@ static bool serviceAccount() {
         AccountResponse r = accountRequest(curl, "/api/status/live", token, epoch);
         expired = r.transport && r.status == 401;
         if (r.transport && r.status == 200) {
-            ok = nextendo::parseLive(r.body, false, games);
+            ok = nextendo::parseLive(r.body, false, games, &wanted);
+            // The raw document is the biggest single allocation here; drop it before
+            // anything else is built on top of it.
+            std::string().swap(r.body);
             if (!ok) {
                 // The parser failed, so keep the bytes for inspection.
                 dumpLiveBody("parse", r.body);
@@ -360,6 +371,7 @@ static bool serviceAccount() {
         g_account.lastAttemptTick = armGetSystemTick();
         if (!identity.empty()) g_account.userName = identity;
         if (job == AccountJob::Login && ok) {
+            g_account.signedOut = false;
             g_account.token = token;
             g_account.games.clear();
             g_account.fetchedTick = 0;

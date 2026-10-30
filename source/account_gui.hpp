@@ -84,16 +84,24 @@ private:
     void redraw() {
         mutexLock(&g_mutex);
         const bool loggedIn = !g_account.token.empty(), busy = g_account.busy;
+        const bool signedOut = g_account.signedOut;
         const std::string message = g_account.message;
         const std::string userName = g_account.userName;
         m_revision = g_account.revision;
         mutexUnlock(&g_mutex);
         m_redraw = false;
+        // The big title had nothing under it; the sign-in state belongs there.
+        m_frame->setSubtitle(loggedIn ? L("已登录", "Signed in")
+                                      : signedOut ? L("已退出登录", "Signed out")
+                                                  : L("未登录", "Not signed in"));
         m_loginShown = m_draft->login;
         m_passwordSize = m_draft->password.size();
         this->removeFocus();
         auto* list = new tsl::elm::List();
-        list->addItem(new tsl::elm::CategoryHeader(loggedIn ? L("已登录", "Signed in") : L("登录账号", "Sign in")));
+        // The state moved into the frame subtitle, so the heading names the block
+        // instead of repeating it.
+        list->addItem(new tsl::elm::CategoryHeader(loggedIn ? L("账号信息", "Account")
+                                                           : L("登录账号", "Sign in")));
         if (!message.empty()) list->addItem(new tsl::elm::ListItem(message));
         if (busy) list->addItem(new tsl::elm::ListItem(L("正在连接…", "Connecting…")));
         if (!loggedIn) {
@@ -139,8 +147,10 @@ private:
         } else {
             // Name the session: the page only had two rows before and said nothing
             // about which account was signed in.
-            list->addItem(new tsl::elm::ListItem(L("账号", "Account"),
-                                                 userName.empty() ? L("读取中…", "Loading…") : userName));
+            auto* user = new tsl::elm::ListItem(L("账号", "Account"),
+                                               userName.empty() ? L("读取中…", "Loading…") : userName);
+            user->setValueColor(tsl::style::color::ColorValueBlue);
+            list->addItem(user);
             auto* logout = new tsl::elm::ListItem(L("退出登录", "Sign out"));
             logout->setClickListener([this](u64 keys) {
                 if (!(keys & HidNpadButton_A)) return false;
@@ -183,6 +193,11 @@ static std::string lobbyModeText(const std::string& mode) {
         {"Match prive", "私人比赛"},
         {"Island open (Dodo Code)", "岛屿开放（需要密码）"},
         {"Quest", "任务"},
+        // The server sends French labels for several games; these are the ones seen
+        // in a live response.
+        {"Guerre de territoire", "涂地对战"},      // Splatoon 3, Turf War
+        {"Course", "竞速"},                        // Nintendo Switch Sports
+        {"Mode 0", "模式 0"},                      // Zombie Army 4
     };
 
     // Several labels carry a " · 1 vs 1" suffix; the base and the suffix are
@@ -289,7 +304,7 @@ public:
     LiveGui(std::string name, std::vector<std::string> ids, int players)
         : m_name(std::move(name)), m_ids(std::move(ids)), m_players(players) {
         g_liveVisible = true;
-        requestLive();
+        requestLive(m_ids);
     }
     ~LiveGui() override { g_liveVisible = false; }
     tsl::elm::Element* createUI() override {
@@ -308,7 +323,7 @@ public:
         if (m_redraw || revision != m_revision) redraw();
     }
     bool handleInput(u64 keys, u64, const HidTouchState&, HidAnalogStickState, HidAnalogStickState) override {
-        if (keys & HidNpadButton_X) { requestLive(); return true; }
+        if (keys & HidNpadButton_X) { requestLive(m_ids); return true; }
         if ((keys & HidNpadButton_B) && m_room >= 0) { m_room = -1; m_redraw = true; return true; }
         return false;
     }
@@ -367,8 +382,13 @@ private:
                 if (game.lobbies.empty()) list->addItem(new tsl::elm::ListItem(L("当前没有公开房间", "No published lobbies")));
                 for (size_t i = 0; i < game.lobbies.size(); ++i) {
                     const auto& room = game.lobbies[i];
-                    auto* row = new CompactItem(L("房间 ", "Lobby ") + std::to_string(i + 1) + " " + lobbyModeText(room.mode),
+                    const std::string label =
+                        L("房间 ", "Lobby ") + std::to_string(i + 1) +
+                        (room.mode.empty() ? std::string() : " " + lobbyModeText(room.mode));
+                    auto* row = new CompactItem(label,
                         std::to_string(room.count) + (room.capacity ? "/" + std::to_string(room.capacity) : ""));
+                    // Same colour as the counts on the main list.
+                    row->setValueColor(tsl::style::color::ColorValueBlue);
                     row->setClickListener([this, i](u64 keys) {
                         if (!(keys & HidNpadButton_A)) return false;
                         m_room = static_cast<int>(i); m_redraw = true; return true;

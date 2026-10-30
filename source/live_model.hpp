@@ -6,10 +6,11 @@
 
 namespace nextendo {
 // Limits are shared by the parser and the UI; avatars are deliberately omitted.
-// A roster with many lobbies and long activity strings is legitimate, and
-// accountWrite() aborts the transfer once this is exceeded - which is
-// indistinguishable from a network failure on screen. Raised accordingly.
-constexpr size_t kMaxBody = 256 * 1024;
+// accountWrite() aborts a transfer that grows past this, and the response string
+// also has to reallocate to hold it - doubling transiently. The live document
+// measures about 24 KB, so 96 KB is four times the headroom; going higher pushed
+// the overlay heap far enough to make libcurl fail with "out of memory".
+constexpr size_t kMaxBody = 96 * 1024;
 struct Player {
     std::string name, activity;
     bool you = false, friendPlayer = false;
@@ -87,7 +88,17 @@ inline bool parseGame(json_t* obj, LiveGame& game) {
     }
     return true;
 }
-inline bool parseLive(const std::string& body, bool single, std::vector<LiveGame>& out) {
+inline bool matches(const LiveGame& game, const std::vector<std::string>& ids) {
+    for (const auto& id : ids)
+        if (std::find(game.titles.begin(), game.titles.end(), id) != game.titles.end()) return true;
+    return false;
+}
+
+// `only`, when given, keeps just the games whose titles it lists. The endpoint
+// sends the whole roster; retaining 46 games' worth of names and lobbies when one
+// game is on screen is what the overlay cannot afford.
+inline bool parseLive(const std::string& body, bool single, std::vector<LiveGame>& out,
+                      const std::vector<std::string>* only = nullptr) {
     if (body.size() > kMaxBody) return false;
     json_error_t err{};
     // No JSON_REJECT_DUPLICATES: a repeated key made the whole document fail to
@@ -108,17 +119,14 @@ inline bool parseLive(const std::string& body, bool single, std::vector<LiveGame
         // one malformed row used to blank the entire roster.
         if (ok) for (size_t i = 0; i < std::min<size_t>(json_array_size(games), 64); ++i) {
             LiveGame game;
-            if (parseGame(json_array_get(games, i), game)) parsed.push_back(std::move(game));
+            if (!parseGame(json_array_get(games, i), game)) continue;
+            if (only != nullptr && !only->empty() && !matches(game, *only)) continue;
+            parsed.push_back(std::move(game));
         }
     }
     json_decref(root);
     if (ok) out = std::move(parsed);
     return ok;
-}
-inline bool matches(const LiveGame& game, const std::vector<std::string>& ids) {
-    for (const auto& id : ids)
-        if (std::find(game.titles.begin(), game.titles.end(), id) != game.titles.end()) return true;
-    return false;
 }
 // Does the buffer hold a closed top-level JSON object?
 //
