@@ -105,13 +105,16 @@ private:
         if (!message.empty()) list->addItem(new tsl::elm::ListItem(message));
         if (busy) list->addItem(new tsl::elm::ListItem(L("正在连接…", "Connecting…")));
         if (!loggedIn) {
-            auto* login = new tsl::elm::ListItem(L("邮箱或用户名", "Email or username"), m_draft->login);
+            auto* login = new tsl::elm::ListItem(L("输入邮箱", "Enter email"), m_draft->login);
+            // Same cyan as every other right-hand value.
+            login->setValueColor(tsl::style::color::ColorValueBlue);
             login->setClickListener([this, busy](u64 keys) {
                 if (busy || !(keys & HidNpadButton_A)) return false;
                 tsl::changeTo<AccountKeyboard>(m_draft, false); return true;
             });
             list->addItem(login);
-            auto* pass = new tsl::elm::ListItem(L("密码", "Password"), m_draft->password.empty() ? "" : "********");
+            auto* pass = new tsl::elm::ListItem(L("输入密码", "Enter password"), m_draft->password.empty() ? "" : "********");
+            pass->setValueColor(tsl::style::color::ColorValueBlue);
             pass->setClickListener([this, busy](u64 keys) {
                 if (busy || !(keys & HidNpadButton_A)) return false;
                 tsl::changeTo<AccountKeyboard>(m_draft, true); return true;
@@ -162,7 +165,7 @@ private:
     }
 };
 static void addAccountEntry(tsl::elm::List* list) {
-    auto* account = new tsl::elm::ListItem(L("Nextendo 账号", "Nextendo account"), L("A 登录 / 管理", "A Sign in / manage"));
+    auto* account = new tsl::elm::ListItem(L("登录 Nextendo 账号", "Sign in to Nextendo"));
     account->setClickListener([](u64 keys) {
         if (!(keys & HidNpadButton_A)) return false;
         tsl::changeTo<AccountGui>(); return true;
