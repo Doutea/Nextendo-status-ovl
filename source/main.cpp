@@ -151,6 +151,9 @@ static std::atomic<bool> g_threadRunning{false};
 
 static Thread g_pollThread;
 static bool g_pollThreadStarted = false;
+// True only while pollThreadFunc is actually running. exitServices() uses it
+// to decide whether tearing the services down is safe yet.
+static std::atomic<bool> g_threadActive{false};
 // Stack for the polling thread.
 //
 // The upstream value was 0x4000 (16 KB). That thread performs DNS resolution, a
@@ -185,6 +188,18 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     buffer->append(static_cast<char*>(contents), totalSize);
     return totalSize;
 }
+
+// Aborts an in-flight request once the overlay is shutting down.
+//
+// exitServices() joins the polling thread, and that thread can be inside
+// curl_easy_perform. Without this the join waited for the request to hit its
+// deadline, which kept the overlay process alive and left the overlay menu unable
+// to open for as long as that took. libcurl calls this about once a second,
+// including while it is still connecting.
+static int shutdownProgress(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return g_threadRunning.load() ? 0 : 1;
+}
+
 
 // The address that last worked, reused so later requests skip the lookup.
 // Last address that worked, per host.
@@ -679,6 +694,11 @@ static bool performOnHandle(CURL* curl, const std::string& url,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connectSeconds);
 
+    // Lets exitServices() cut the transfer short; see shutdownProgress().
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, shutdownProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, static_cast<void*>(nullptr));
+
     struct curl_slist* resolveList = nullptr;
 
     const std::string cachedIp = g_cachedIpByHost.count(host)
@@ -886,6 +906,7 @@ static std::atomic<bool> g_manualRefresh{false};
 static void maybeRefreshNames(const std::vector<JeuEntry>& jeux);
 
 static void pollThreadFunc(void*) {
+    g_threadActive = true;
     // No game-config download here any more. It fed the per-title detail view,
     // which has no entry point since the panel was reworked, so the request was
     // pure overhead: a GitHub fetch and an SD-card write on every open.
@@ -964,12 +985,9 @@ static void pollThreadFunc(void*) {
             lastCountsTick = armGetSystemTick();
         }
 
-        mutexLock(&g_mutex);
-        const bool liveDue = g_overlayVisible.load() && g_liveVisible.load() && !g_account.token.empty() &&
-            !g_account.busy && (g_account.lastAttemptTick == 0 ||
-            armTicksToNs(armGetSystemTick() - g_account.lastAttemptTick) >= 15'000'000'000ULL);
-        mutexUnlock(&g_mutex);
-        if (liveDue) requestLive();
+        // No periodic live refresh. It fired every 15s while the roster page was
+        // open, which was both wasteful and made the page flash; the page is a
+        // snapshot, fetched when it opens and again on X.
 
         for (int i = 0; i < 10 && g_threadRunning.load(); i++) {
             if (g_refreshRequested.load() || g_accountWake.load()) break;
@@ -977,6 +995,7 @@ static void pollThreadFunc(void*) {
             if (g_refreshRequested.load() || g_accountWake.load()) break;
         }
     }
+    g_threadActive = false;
 }
 
 static const std::map<std::string, std::string> g_gameNamesZh = {
@@ -1930,13 +1949,33 @@ public:
         }
     }
     virtual void exitServices() override {
+        // This runs just before main() returns, and the process has to end for
+        // nx-ovlloader to come back. While it lives the overlay menu cannot be opened
+        // at all and the console needs a reboot, so nothing here may block
+        // indefinitely - an unclean teardown is the lesser problem, because the
+        // kernel releases every service and handle when the process exits anyway.
         g_threadRunning = false;
-        if (g_pollThreadStarted) {
-            threadWaitForExit(&g_pollThread);
-            threadClose(&g_pollThread);
+
+        // curl abandons an in-flight transfer within about a second of the flag going
+        // false (shutdownProgress). Wait that long, never longer.
+        for (int i = 0; i < 40 && g_threadActive.load(); ++i) {
+            svcSleepThread(25'000'000LL);   // 25 ms; one second in total
         }
+
         wipe(g_account.password);
         wipe(g_account.token);
+
+        // Tear the services down only when the worker has actually stopped. Doing it
+        // while it is still inside libcurl can block, and a blocked exitServices() is
+        // what kept this process alive and the overlay menu shut.
+        if (g_threadActive.load()) return;
+
+        if (g_pollThreadStarted) {
+            // The worker has returned, so this is immediate.
+            threadWaitForExit(&g_pollThread);
+            threadClose(&g_pollThread);
+            g_pollThreadStarted = false;
+        }
 
         curl_global_cleanup();
         socketExit();

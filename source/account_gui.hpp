@@ -242,9 +242,10 @@ public:
     }
 
     virtual void draw(tsl::gfx::Renderer* renderer) override {
+        // Only the top rule. ListItem draws two, but both land on getY() because
+        // getTopBound() returns it, so the visible result is one line per row - and
+        // a bottom rule here would land on the footer rule at the fold.
         renderer->drawRect(this->getX(), this->getY(), this->getWidth(), 1,
-                           tsl::style::color::ColorFrame);
-        renderer->drawRect(this->getX(), this->getBottomBound() - 1, this->getWidth(), 1,
                            tsl::style::color::ColorFrame);
 
         const s32 baseline = this->getY() + kCompactRowHeight - 7;
@@ -271,23 +272,6 @@ public:
                                  this->getX() + this->getWidth() - static_cast<s32>(valueWidth) - 20,
                                  baseline, 18, colour);
         }
-    }
-};
-
-class CompactList : public tsl::elm::CustomDrawer {
-public:
-    CompactList(const std::vector<std::string>& rows, s32 lineHeight)
-        : tsl::elm::CustomDrawer([rows, lineHeight](tsl::gfx::Renderer* r, s32 x, s32 y, s32 w, s32 h) {
-              s32 rowY = y;
-              for (const auto& text : rows) {
-                  if (rowY + lineHeight > y + h) break;
-                  r->drawString(text.c_str(), false, x + 20, rowY + lineHeight - 7, 20,
-                                tsl::style::color::ColorText);
-                  r->drawRect(x, rowY + lineHeight - 1, w, 1, tsl::style::color::ColorFrame);
-                  rowY += lineHeight;
-              }
-          }) {
-        this->setBoundaries(0, 0, 0, static_cast<s32>(rows.size()) * lineHeight);
     }
 };
 
@@ -335,17 +319,17 @@ private:
             return;
         }
 
-        // No self/friend tag: the endpoint sends name/avatar/color/lobby/activity
-        // and never "you" or "friend", so the tag was always empty. The activity
-        // text rides on the same line instead of taking a row of its own.
-        std::vector<std::string> rows;
-        rows.reserve(players.size());
+        // One focusable row per player. A single non-focusable block would save the
+        // same space, but the list only scrolls while focus moves, so anything past
+        // the fold became unreachable - which is exactly what happened.
+        //
+        // No self/friend tag: the endpoint never sends "you" or "friend" (checked
+        // across 92 players), and the activity text rides on the same line.
         for (const auto& player : players) {
             std::string line = player.name.empty() ? L("未命名玩家", "Unnamed player") : player.name;
             if (!player.activity.empty()) line += "  \u00b7  " + player.activity;
-            rows.push_back(std::move(line));
+            list->addItem(new CompactItem(line));
         }
-        list->addItem(new CompactList(rows, kCompactRowHeight));
     }
     void redraw() {
         nextendo::LiveGame game;
@@ -366,7 +350,6 @@ private:
             if (!error.empty()) list->addItem(new tsl::elm::ListItem(error));
             addAccountEntry(list);
         } else {
-            if (busy) list->addItem(new tsl::elm::ListItem(L("刷新房间中…", "Refreshing lobbies…")));
             if (!error.empty()) list->addItem(new tsl::elm::ListItem(error));
             if (!found && !busy) list->addItem(new tsl::elm::ListItem(L("该游戏当前没有公开的房间或玩家详情", "No published lobby or player details for this game")));
             if (found && m_room >= 0 && static_cast<size_t>(m_room) < game.lobbies.size()) {
