@@ -116,14 +116,6 @@ static void logoutAccount() {
     mutexUnlock(&g_mutex);
     g_accountWake = true;
 }
-static size_t accountWrite(void* data, size_t size, size_t count, void* user) {
-    auto* body = static_cast<std::string*>(user);
-    if (size && count > nextendo::kMaxBody / size) return 0;
-    const size_t n = size * count;
-    if (n > nextendo::kMaxBody - body->size()) return 0;
-    body->append(static_cast<char*>(data), n);
-    return n;
-}
 static bool accountEpochIsCurrent(unsigned epoch) {
     mutexLock(&g_mutex);
     const bool current = epoch == g_account.epoch && g_threadRunning.load();
@@ -163,18 +155,10 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post ? post->c_str() : nullptr);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, post ? static_cast<long>(post->size()) : 0L);
     if (!post) curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
-    // performOnHandle installs its own callback, so supply our bounded sink there.
-    // The deadlines are wider than the counts request: this document is bigger and
-    // carries a session, and a timeout here looked like a network failure.
-    // Give up a few seconds after the body stops growing. The live endpoint never
-    // closes its connection, so without this every request burns its whole
-    // deadline before returning anything.
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 3L);
-
+    // The shared transport owns framing, time budgets and safe IP retries.
     result.transport = performOnHandle(curl, std::string("https://nextendo.network") + path,
         "nextendo.network", NEXTENDO_FALLBACK_IPS, result.body, result.error, true,
-        timeoutSeconds, connectSeconds);
+        timeoutSeconds, connectSeconds, post != nullptr);
 
     // Read the status unconditionally: when the transfer is cut short it still
     // carries the real code, and "HTTP 0" was only ever a missing read.

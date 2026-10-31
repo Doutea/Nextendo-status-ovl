@@ -20,6 +20,7 @@
 #include <cstring>
 // completeJson() lives here and performOnHandle() needs it.
 #include "live_model.hpp"
+#include "transport_policy.hpp"
 
 // ---------------------------------------------------------------------------
 // Language handling
@@ -166,20 +167,28 @@ static std::atomic<bool> g_threadActive{false};
 alignas(0x1000) static u8 g_threadStack[0x40000];
 
 // --- Red ---
-std::string resolveHostToIp(const std::string& hostname) {
+static std::vector<std::string> resolveHostIps(const std::string& hostname) {
     struct addrinfo hints{};
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
     struct addrinfo* result = nullptr;
     int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &result);
-    if (ret != 0 || !result) return "";
-
-    char ipStr[16];
-    auto* addr = reinterpret_cast<struct sockaddr_in*>(result->ai_addr);
-    inet_ntop(AF_INET, &(addr->sin_addr), ipStr, sizeof(ipStr));
+    if (ret != 0 || !result) return {};
+    std::vector<std::string> ips;
+    for (auto* entry = result; entry; entry = entry->ai_next) {
+        if (entry->ai_family != AF_INET || !entry->ai_addr) continue;
+        char ipStr[16]{};
+        auto* addr = reinterpret_cast<struct sockaddr_in*>(entry->ai_addr);
+        if (inet_ntop(AF_INET, &addr->sin_addr, ipStr, sizeof(ipStr)) &&
+            std::find(ips.begin(), ips.end(), ipStr) == ips.end()) ips.emplace_back(ipStr);
+    }
     freeaddrinfo(result);
-    return std::string(ipStr);
+    return ips;
+}
+std::string resolveHostToIp(const std::string& hostname) {
+    const auto ips = resolveHostIps(hostname);
+    return ips.empty() ? std::string() : ips.front();
 }
 
 static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -672,86 +681,7 @@ static int parseGameStatConnected(const std::string& rawJson) {
     return value;
 }
 
-// Performs one request on an already-initialised handle.
-//
-// Only the URL and the sink change between calls, which is what lets libcurl keep
-// the connection: the resolve list is rebuilt per request because a successful
-// request records the address that served it.
-static size_t accountWrite(void*, size_t, size_t, void*);
-static bool performOnHandle(CURL* curl, const std::string& url,
-                            const std::string& host,
-                            const std::vector<std::string>& fallbackIps,
-                            std::string& responseBuffer, std::string& errorOut,
-                            bool bounded = false,
-                            long timeoutSeconds = 12L, long connectSeconds = 8L) {
-    responseBuffer.clear();
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, bounded ? accountWrite : WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBuffer);
-    // The address is pinned below, so there is no DNS stall to ride out. The
-    // deadlines are parameters because the authenticated live document is much
-    // larger than the counts one and needs longer than the default.
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connectSeconds);
-
-    // Lets exitServices() cut the transfer short; see shutdownProgress().
-    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, shutdownProgress);
-    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, static_cast<void*>(nullptr));
-
-    struct curl_slist* resolveList = nullptr;
-
-    const std::string cachedIp = g_cachedIpByHost.count(host)
-                                     ? g_cachedIpByHost[host]
-                                     : std::string();
-
-    if (!cachedIp.empty()) {
-        const std::string entry = host + ":443:" + cachedIp;
-        resolveList = curl_slist_append(resolveList, entry.c_str());
-    }
-    const std::string resolved = resolveHostToIp(host);
-    if (!resolved.empty() && resolved != cachedIp) {
-        const std::string entry = host + ":443:" + resolved;
-        resolveList = curl_slist_append(resolveList, entry.c_str());
-    }
-    for (const auto& ip : fallbackIps) {
-        if (ip == cachedIp || ip == resolved) continue;
-        const std::string entry = host + ":443:" + ip;
-        resolveList = curl_slist_append(resolveList, entry.c_str());
-    }
-
-    curl_easy_setopt(curl, CURLOPT_RESOLVE, resolveList);
-
-    const CURLcode res = curl_easy_perform(curl);
-
-    if (res == CURLE_OK) {
-        char* usedIp = nullptr;
-        if (curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &usedIp) == CURLE_OK && usedIp) {
-            g_cachedIpByHost[host] = usedIp;
-        }
-    }
-
-    // Drop the reference before freeing, so the handle never points at freed
-    // memory when it is reused.
-    curl_easy_setopt(curl, CURLOPT_RESOLVE, (struct curl_slist*)nullptr);
-    if (resolveList) curl_slist_free_all(resolveList);
-
-    if (res != CURLE_OK) {
-        // The server can deliver the whole document and then leave the connection
-        // open without the terminating chunk, which surfaces here as a timeout even
-        // though every byte arrived. A closed JSON object is the payload we asked
-        // for, so keep it.
-        if (nextendo::completeJson(responseBuffer)) {
-            errorOut.clear();
-            return true;
-        }
-        errorOut = curl_easy_strerror(res);
-        return false;
-    }
-
-    errorOut.clear();
-    return true;
-}
+#include "http_transport.hpp"
 
 #include "account.hpp"
 
