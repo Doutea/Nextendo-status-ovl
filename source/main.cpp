@@ -21,6 +21,7 @@
 // completeJson() lives here and performOnHandle() needs it.
 #include "live_model.hpp"
 #include "transport_policy.hpp"
+#include "relay_config.hpp"
 
 // ---------------------------------------------------------------------------
 // Language handling
@@ -1839,6 +1840,7 @@ public:
     virtual void initServices() override {
         fsdevMountSdmc();
         ensureDataDirs();
+        loadRelayRoute();
 
         timeInitialize();
         nifmInitialize(NifmServiceType_User);

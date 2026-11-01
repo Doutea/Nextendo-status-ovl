@@ -24,7 +24,7 @@ static void recordNetworkTrace(const std::string& line) {
     static std::vector<std::string> recent;
     recent.push_back(line.substr(0, 384));
     if (recent.size() > 24) recent.erase(recent.begin());
-    std::string text = "Nextendo direct transport v1.5.11; times in ms; no credentials or response bodies\n";
+    std::string text = "Nextendo transport v1.5.12; times in ms; no credentials or response bodies\n";
     for (const auto& entry : recent) text += entry + "\n";
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
@@ -39,20 +39,32 @@ static void recordNetworkTrace(const std::string& line) {
     }
     fsFsClose(&fs);
 }
-static bool performOnHandle(CURL* curl, const std::string& url, const std::string& host,
-        const std::vector<std::string>& fallback, std::string& body, std::string& error,
+static bool performOnHandle(CURL* curl, const std::string& originUrl, const std::string& originHost,
+        const std::vector<std::string>& originFallback, std::string& body, std::string& error,
         bool bounded = false, long timeoutSeconds = 12L, long connectSeconds = 8L, bool post = false) {
     body.clear(); error.clear();
+    if (originHost == "nextendo.network" && !g_relayRoute.error.empty()) {
+        error = "Relay config: " + g_relayRoute.error;
+        return false;
+    }
+    const auto route = nextendo::selectRoute(g_relayRoute, originUrl, originHost, originFallback);
+    const auto& host = route.host;
+    const auto& url = route.url;
     const u64 start = armGetSystemTick();
     const auto cached = g_cachedIpByHost.find(host);
-    const auto ips = nextendo::ipCandidates(cached == g_cachedIpByHost.end() ? "" : cached->second,
-                                          resolveHostIps(host), fallback);
+    auto resolved = route.connectTo.empty() ? resolveHostIps(host) : std::vector<std::string>{};
+    // relay_ip is a preferred address, not a permanent lock: if it fails, try
+    // current DNS answers. A previously successful cached address comes first.
+    if (route.relayed && !route.fallback.empty()) resolved.insert(resolved.begin(), route.fallback.front());
+    const auto ips = !route.connectTo.empty() ? std::vector<std::string>{g_relayRoute.tcpIp} :
+        nextendo::ipCandidates(cached == g_cachedIpByHost.end() ? "" : cached->second, resolved, route.fallback);
     const long dnsMs = static_cast<long>(armTicksToNs(armGetSystemTick() - start) / 1000000ULL);
     if (ips.empty()) { error = "DNS failed"; recordNetworkTrace(host + " DNS failed"); return false; }
     std::string path = url.substr(std::min(url.find('/', 8), url.size()));
     const size_t query = path.find('?');
     if (query != std::string::npos) path.resize(query); // never log query values
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    if (route.relayed) curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl, CURLOPT_SSLVERSION, static_cast<long>(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2));
@@ -76,7 +88,9 @@ static bool performOnHandle(CURL* curl, const std::string& url, const std::strin
         const long remaining = timeoutSeconds * 1000L - elapsed;
         if (remaining <= 0) { if (error.empty()) error = "Request time budget exhausted"; break; }
         const long slots = static_cast<long>(ips.size() - attempt);
-        const long attemptMs = std::max(1L, remaining / slots);
+        // A transmitted login is never replayed, so reserve its full response
+        // budget. Failed pre-send connections still switch to another address.
+        const long attemptMs = post ? remaining : std::max(1L, remaining / slots);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, attemptMs);
         curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, std::min({connectSeconds * 1000L, attemptMs, 6000L}));
         curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, attempt == 0 ? 0L : 1L);
@@ -84,9 +98,18 @@ static bool performOnHandle(CURL* curl, const std::string& url, const std::strin
         HttpSink sink{&body, bounded, {}, false, false};
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
         const std::string entry = host + ":443:" + ips[attempt];
-        auto* resolve = curl_slist_append(nullptr, entry.c_str());
-        if (!resolve) { error = "Could not allocate resolver entry"; break; }
+        auto* resolve = route.connectTo.empty() ? curl_slist_append(nullptr, entry.c_str()) : nullptr;
+        auto* connect = route.connectTo.empty() ? nullptr : curl_slist_append(nullptr, route.connectTo.c_str());
+        auto* relayHeaders = route.relayed && !bounded ? curl_slist_append(nullptr,
+            ("X-Nextendo-Relay-Key: " + g_relayRoute.key).c_str()) : nullptr;
+        if ((route.connectTo.empty() && !resolve) || (!route.connectTo.empty() && !connect) ||
+            (route.relayed && !bounded && !relayHeaders)) {
+            curl_slist_free_all(resolve); curl_slist_free_all(connect); curl_slist_free_all(relayHeaders);
+            error = "Could not allocate request options"; break;
+        }
         curl_easy_setopt(curl, CURLOPT_RESOLVE, resolve);
+        curl_easy_setopt(curl, CURLOPT_CONNECT_TO, connect);
+        if (relayHeaders) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, relayHeaders);
         const CURLcode code = curl_easy_perform(curl);
         long status = 0, requestBytes = 0;
         curl_off_t uploaded = 0;
@@ -103,6 +126,12 @@ static bool performOnHandle(CURL* curl, const std::string& url, const std::strin
         curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total);
         curl_easy_setopt(curl, CURLOPT_RESOLVE, static_cast<struct curl_slist*>(nullptr));
         curl_slist_free_all(resolve);
+        curl_easy_setopt(curl, CURLOPT_CONNECT_TO, static_cast<struct curl_slist*>(nullptr));
+        curl_slist_free_all(connect);
+        if (relayHeaders) {
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, static_cast<struct curl_slist*>(nullptr));
+            curl_slist_free_all(relayHeaders);
+        }
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, static_cast<void*>(nullptr));
         const bool complete = sink.stopped && sink.frame.complete() && !sink.tooLarge;
         const bool ok = code == CURLE_OK || (complete && status >= 200 &&

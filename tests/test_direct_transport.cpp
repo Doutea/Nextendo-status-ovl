@@ -9,6 +9,8 @@
 #include <map>
 #include "../source/live_model.hpp"
 #include "../source/transport_policy.hpp"
+#include "../source/relay_route.hpp"
+static nextendo::RelayRoute g_relayRoute;
 using u64 = unsigned long long;
 using s64 = long long;
 using Result = int;
@@ -30,7 +32,10 @@ static std::map<std::string, std::string> g_cachedIpByHost;
 static u64 clockMs = 0;
 static u64 armGetSystemTick() { return clockMs; }
 static u64 armTicksToNs(u64 tick) { return tick * 1000000; }
-static std::vector<std::string> resolveHostIps(const std::string&) { return {"104.21.84.82", "172.67.190.75"}; }
+static std::vector<std::string> resolveHostIps(const std::string& host) {
+    return host == "relay.example.com" ? std::vector<std::string>{"104.21.62.41", "172.67.219.244"}
+                                      : std::vector<std::string>{"104.21.84.82", "172.67.190.75"};
+}
 static int shutdownProgress(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) { return g_threadRunning ? 0 : 1; }
 using WriteFn = size_t (*)(void*, size_t, size_t, void*);
 struct Reply {
@@ -39,7 +44,8 @@ struct Reply {
     u64 elapsed = 100;
 };
 struct FakeCurl {
-    std::string url, resolve, ip, encoding;
+    std::string url, resolve, ip, encoding, connect;
+    std::vector<std::string> headers;
     WriteFn write = nullptr;
     void* sink = nullptr;
     curl_xferinfo_callback progress = nullptr;
@@ -49,6 +55,7 @@ struct FakeCurl {
 };
 static std::deque<Reply> replies;
 static std::vector<std::string> attempts;
+static std::vector<std::vector<std::string>> seenHeaders;
 extern "C" CURLcode curl_easy_setopt(CURL* ptr, CURLoption option, ...) {
     auto& c = *reinterpret_cast<FakeCurl*>(ptr);
     va_list args; va_start(args, option);
@@ -63,6 +70,17 @@ extern "C" CURLcode curl_easy_setopt(CURL* ptr, CURLoption option, ...) {
             const auto* list = va_arg(args, curl_slist*);
             if (list) { assert(!list->next); c.resolve = list->data; }
             else c.resolve.clear();
+            break;
+        }
+        case CURLOPT_CONNECT_TO: {
+            const auto* list = va_arg(args, curl_slist*);
+            c.connect = list ? list->data : "";
+            break;
+        }
+        case CURLOPT_HTTPHEADER: {
+            const auto* list = va_arg(args, curl_slist*);
+            c.headers.clear();
+            for (; list; list = list->next) c.headers.emplace_back(list->data);
             break;
         }
         default: c.options[option] = va_arg(args, long); break;
@@ -96,8 +114,17 @@ extern "C" CURLcode curl_easy_perform(CURL* ptr) {
     assert(c.options[CURLOPT_HTTP_VERSION] == CURL_HTTP_VERSION_1_1);
     assert(c.options[CURLOPT_SSLVERSION] == (CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2));
     assert(c.options[CURLOPT_LOW_SPEED_TIME] == 0 && c.encoding == "gzip, deflate");
-    assert(c.resolve.rfind("nextendo.network:443:", 0) == 0);
-    c.ip = c.resolve.substr(std::string("nextendo.network:443:").size());
+    const std::string host = c.url.substr(8, c.url.find('/', 8) - 8);
+    if (c.connect.empty()) {
+        const auto prefix = host + ":443:";
+        assert(c.resolve.rfind(prefix, 0) == 0);
+        c.ip = c.resolve.substr(prefix.size());
+    } else {
+        assert(c.resolve.empty() && c.connect.rfind("nextendo.network:443:", 0) == 0);
+        const auto value = c.connect.substr(std::string("nextendo.network:443:").size());
+        c.ip = value.substr(0, value.find(':'));
+    }
+    seenHeaders.push_back(c.headers);
     attempts.push_back(c.ip);
     c.current = replies.front(); replies.pop_front(); clockMs += c.current.elapsed;
     for (char& ch : c.current.body)
@@ -106,7 +133,7 @@ extern "C" CURLcode curl_easy_perform(CURL* ptr) {
 }
 #include "../source/http_transport.hpp"
 static int accountCallback(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) { return 0; }
-static void reset() { replies.clear(); attempts.clear(); g_cachedIpByHost.clear(); clockMs = 0; g_threadRunning = true; }
+static void reset() { replies.clear(); attempts.clear(); seenHeaders.clear(); g_cachedIpByHost.clear(); g_relayRoute = {}; clockMs = 0; g_threadRunning = true; }
 int main() {
     using namespace nextendo;
     assert((ipCandidates("b", {"a", "b"}, {"b", "c", "d", "e"}) == std::vector<std::string>{"b", "a", "c", "d"}));
@@ -160,6 +187,34 @@ int main() {
     assert(!run() && attempts.size() == 1 && error.find("96 KB") != std::string::npos);
     reset(); replies.push_back({CURLE_OPERATION_TIMEDOUT, 0, "", 0, 0, 20000});
     assert(!run() && attempts.size() == 1); // total budget, not per-IP full timeouts
+    reset();
+    const std::string relayKey(64, 'b');
+    g_relayRoute = parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip=104.21.62.41\nrelay_key=" + relayKey);
+    replies.push_back({CURLE_COULDNT_CONNECT, 0, "", 0, 0, 1000});
+    replies.push_back({CURLE_OK, 200, R"({"counts":{}})"});
+    assert(performOnHandle(curl, "https://nextendo.network/api/online-counts", "nextendo.network",
+        {"104.21.84.82", "172.67.190.75"}, body, error));
+    assert(c.url == "https://relay.example.com/api/online-counts");
+    assert((attempts == std::vector<std::string>{"104.21.62.41", "172.67.219.244"}));
+    assert(g_cachedIpByHost.count("nextendo.network") == 0 && g_cachedIpByHost["relay.example.com"] == "172.67.219.244");
+    assert(seenHeaders.size() == 2 && seenHeaders[0] == std::vector<std::string>{"X-Nextendo-Relay-Key: " + relayKey});
+    assert(c.headers.empty() && c.connect.empty());
+    attempts.clear();
+    c.headers = {"Authorization: Bearer private.session", "X-Nextendo-Relay-Key: " + relayKey};
+    c.progress = accountCallback; c.progressData = &epoch;
+    replies.push_back({CURLE_OK, 401, R"({"error":"expired"})"});
+    assert(run() && attempts.size() == 1 && attempts[0] == "172.67.219.244");
+    assert(c.headers.size() == 2 && c.headers[0] == "Authorization: Bearer private.session");
+    assert(c.progress == accountCallback && c.progressData == &epoch);
+    assert(diagnostic.find(relayKey) == std::string::npos && diagnostic.find("private.session") == std::string::npos);
+    reset();
+    g_relayRoute = parseRelayRoute("relay_url=http://insecure.example\nrelay_key=" + relayKey);
+    assert(!run() && attempts.empty() && error.find("Relay config:") == 0);
+    reset();
+    g_relayRoute = parseRelayRoute("tcp_relay=192.168.31.167:18443");
+    replies.push_back({CURLE_OK, 401, R"({"error":"expired"})"});
+    assert(run() && c.url == "https://nextendo.network/api/status/live" && attempts[0] == "192.168.31.167");
+    assert(c.connect.empty() && c.resolve.empty());
     assert(replies.empty());
     std::cout << "Direct transport checks passed\n";
 }

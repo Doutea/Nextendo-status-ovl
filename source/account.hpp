@@ -142,6 +142,7 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     struct curl_slist* headers = nullptr;
     headers = curl_slist_append(headers, "X-Nextendo-Client-Id: nxc_hvGUwjpszrDT");
     headers = curl_slist_append(headers, "Accept: application/json");
+    if (g_relayRoute.enabled()) headers = curl_slist_append(headers, ("X-Nextendo-Relay-Key: " + g_relayRoute.key).c_str());
     if (!token.empty()) headers = curl_slist_append(headers, ("Authorization: Bearer " + token).c_str());
     if (post) headers = curl_slist_append(headers, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -177,6 +178,8 @@ static AccountResponse accountRequest(CURL* curl, const char* path,
     return result;
 }
 static std::string accountError(const AccountResponse& r, bool login) {
+    if (g_relayRoute.enabled() && r.status == 403 && r.body.find("relay_access_denied") != std::string::npos)
+        return L("中转密钥不匹配，请检查 network.ini", "Relay key rejected; check network.ini");
     if (!r.transport) {
         // Show curl's reason: "Timeout was reached" and "Failure writing output"
         // are the two that looked identical before.
@@ -291,7 +294,8 @@ static bool serviceAccount() {
         } else message = accountError(r, false);
     } else {
         const u64 liveStart = armGetSystemTick();
-        AccountResponse r = accountRequest(curl, "/api/status/live", token, epoch);
+        const auto livePath = nextendo::relayLivePath(g_relayRoute, "/api/status/live", wanted);
+        AccountResponse r = accountRequest(curl, livePath.c_str(), token, epoch);
         expired = r.transport && r.status == 401;
         if (r.transport && r.status == 200) {
             ok = nextendo::parseLive(r.body, false, games, &wanted);
@@ -320,6 +324,7 @@ static bool serviceAccount() {
         const bool mainWasQuick = armTicksToNs(armGetSystemTick() - liveStart) < 15'000'000'000ULL;
         if (!expired && mainWasQuick) for (const auto& feed : {std::pair<const char*, const char*>{"/game-stats/kirby-live", "0100a8e016236000"},
                                       {"/game-stats/uno-live", "0100b6e012ebe000"}}) {
+            if (!wanted.empty() && std::find(wanted.begin(), wanted.end(), feed.second) == wanted.end()) continue;
             AccountResponse extra = accountRequest(curl, feed.first, token, epoch, nullptr, 8L, 5L);
             std::vector<nextendo::LiveGame> replacement;
             if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, true, replacement)) {
@@ -335,10 +340,16 @@ static bool serviceAccount() {
             const std::vector<std::string> catalogTitles = {"0100d870045b6000", "01008d300c50c000", "0100c62011050000",
                 "010012f017576000", "0100b3c014bda000", "0100ea6014bb8000", "0100fcf002a58000", "0100ab401f136000",
                 "01003fb00c5a8000", "0100227010460000"};
+            bool needCatalog = wanted.empty();
+            for (const auto& id : wanted)
+                if (std::find(catalogTitles.begin(), catalogTitles.end(), id) != catalogTitles.end()) needCatalog = true;
             games.erase(std::remove_if(games.begin(), games.end(), [&](const auto& g) {
                 return nextendo::matches(g, catalogTitles); }), games.end());
-            AccountResponse extra = accountRequest(curl, "/service-catalog/v1/status/live", token, epoch,
-                                                   nullptr, 8L, 5L);
+            AccountResponse extra;
+            if (needCatalog) {
+                const auto catalogPath = nextendo::relayLivePath(g_relayRoute, "/service-catalog/v1/status/live", wanted);
+                extra = accountRequest(curl, catalogPath.c_str(), token, epoch, nullptr, 12L, 6L);
+            }
             std::vector<nextendo::LiveGame> catalog;
             if (extra.transport && extra.status == 200 && nextendo::parseLive(extra.body, false, catalog)) {
                 const size_t before = games.size();
