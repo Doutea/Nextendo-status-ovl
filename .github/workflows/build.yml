@@ -21,7 +21,11 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
 
       - name: Build main overlay
-        run: bash scripts/build.sh
+        env:
+          NEXTENDO_RELAY_KEY: ${{ secrets.NEXTENDO_RELAY_KEY }}
+        run: |
+          sed -i 's/\r//g' Makefile scripts/build.sh scripts/embed_relay.py
+          bash scripts/build.sh
 
       - name: Upload main overlay
         uses: actions/upload-artifact@v4
