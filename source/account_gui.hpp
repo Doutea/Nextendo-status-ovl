@@ -309,7 +309,7 @@ public:
         g_liveVisible = true;
         requestLive(m_ids);
     }
-    ~LiveGui() override { g_liveVisible = false; }
+    ~LiveGui() override { g_liveVisible = false; cancelLive(); }
     tsl::elm::Element* createUI() override {
         // The subtitle carries the game's total from the counts document - the
         // same figure the main list shows. The live payload only names the players
@@ -366,6 +366,9 @@ private:
         m_revision = g_account.revision;
         for (const auto& g : g_account.games) if (nextendo::matches(g, m_ids)) { game = g; found = true; break; }
         mutexUnlock(&g_mutex);
+        const std::string subtitle = std::string(L("当前游戏 ", "")) + std::to_string(m_players) +
+            L(" 人在线", " online in this game") + (busy ? L(" · 加载中…", " · Loading…") : "");
+        m_frame->setSubtitle(subtitle);
         this->removeFocus();
         m_redraw = false;
         auto* list = new tsl::elm::List();

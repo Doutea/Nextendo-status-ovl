@@ -153,9 +153,12 @@ static std::atomic<bool> g_threadRunning{false};
 
 static Thread g_pollThread;
 static bool g_pollThreadStarted = false;
-// True only while pollThreadFunc is actually running. exitServices() uses it
-// to decide whether tearing the services down is safe yet.
-static std::atomic<bool> g_threadActive{false};
+static std::atomic<bool> g_shutdownRequested{false};
+// A worker's own flag is set before its runtime thread/TLS epilogue finishes.
+// Only the kernel thread signal proves that its stack can be unmapped safely.
+static bool networkWorkerFinished() {
+    return !g_pollThreadStarted || R_SUCCEEDED(waitSingle(waiterForThread(&g_pollThread), 0));
+}
 // Stack for the polling thread.
 //
 // The upstream value was 0x4000 (16 KB). That thread performs DNS resolution, a
@@ -578,6 +581,7 @@ static std::vector<JeuEntry> buildGameList(const std::vector<JeuEntry>& apiJeux,
 
 std::string fetchUrl(const std::string& url, const std::string& host,
                      const std::vector<std::string>& fallbackIps, std::string& errorOut) {
+    if (!g_threadRunning.load()) { errorOut = "closing"; return ""; }
     std::string responseBuffer;
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -595,6 +599,9 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, shutdownProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, static_cast<void*>(nullptr));
 
     struct curl_slist* resolveList = nullptr;
 
@@ -609,7 +616,7 @@ std::string fetchUrl(const std::string& url, const std::string& host,
     }
 
     // Then whatever libnx's resolver reports for the name.
-    const std::string resolved = resolveHostToIp(host);
+    const std::string resolved = (!cachedIp.empty() || !fallbackIps.empty()) ? "" : resolveHostToIp(host);
     if (!resolved.empty() && resolved != cachedIp) {
         const std::string entry = host + ":443:" + resolved;
         resolveList = curl_slist_append(resolveList, entry.c_str());
@@ -685,6 +692,19 @@ static int parseGameStatConnected(const std::string& rawJson) {
 #include "http_transport.hpp"
 
 #include "account.hpp"
+
+static void beginSafeExit() {
+    if (g_shutdownRequested.exchange(true)) return;
+    g_overlayVisible = false;
+    g_liveVisible = false;
+    g_threadRunning = false;
+    cancelLive();
+    mutexLock(&g_mutex);
+    g_account.job = AccountJob::None;
+    g_account.livePending = false;
+    mutexUnlock(&g_mutex);
+    g_accountWake = true;
+}
 
 // Fetches the counts document and then the three per-game feeds, all on one
 // handle so the connection is reused.
@@ -837,7 +857,6 @@ static std::atomic<bool> g_manualRefresh{false};
 static void maybeRefreshNames(const std::vector<JeuEntry>& jeux);
 
 static void pollThreadFunc(void*) {
-    g_threadActive = true;
     // No game-config download here any more. It fed the per-title detail view,
     // which has no entry point since the panel was reworked, so the request was
     // pure overhead: a GitHub fetch and an SD-card write on every open.
@@ -845,6 +864,7 @@ static void pollThreadFunc(void*) {
     u64 lastCountsTick = 0;
     while (g_threadRunning.load()) {
         serviceAccount();
+        if (!g_threadRunning.load()) break;
         const bool requested = g_refreshRequested.exchange(false);
 
         if (requested || (g_overlayVisible.load() &&
@@ -855,6 +875,7 @@ static void pollThreadFunc(void*) {
             std::map<std::string, int> gameStats;
             std::string raw;
             fetchRefreshBundle(raw, error, gameStats);
+            if (!g_threadRunning.load()) break;
 
             auto newCounts = parseOnlineCounts(raw);
             auto apiJeux = parseJeux(raw);
@@ -908,7 +929,7 @@ static void pollThreadFunc(void*) {
             // A game with no translation is the signal to pull the current table
             // from the repository.
             if (g_accountWake.load()) serviceAccount();
-            maybeRefreshNames(newJeux);
+            if (g_threadRunning.load()) maybeRefreshNames(newJeux);
 
             g_refreshing = false;
             g_manualRefresh = false;
@@ -926,7 +947,7 @@ static void pollThreadFunc(void*) {
             if (g_refreshRequested.load() || g_accountWake.load()) break;
         }
     }
-    g_threadActive = false;
+    recordNetworkTrace("worker returned; awaiting kernel thread-exit signal");
 }
 
 static const std::map<std::string, std::string> g_gameNamesZh = {
@@ -1556,6 +1577,7 @@ public:
         // it unconditionally and an empty std::function would abort.
         m_totalItem = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         m_totalItem->setClickListener([](u64 keys) {
+            if (g_shutdownRequested.load()) return true;
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
                 // Raised here rather than in the thread: this runs on the frame
@@ -1577,6 +1599,12 @@ public:
     }
 
     virtual void update() override {
+        if (g_shutdownRequested.load()) {
+            m_frame->setSubtitle(L("正在安全退出…", "Stopping network safely…"));
+            if (m_totalItem) m_totalItem->setValue(L("等待网络结束", "Stopping…"), true);
+            if (networkWorkerFinished()) tsl::Overlay::get()->close();
+            return;
+        }
         const bool dirty = g_dirty.exchange(false);
         const bool manual = g_manualRefresh.load();
         const bool active = g_refreshing.load();
@@ -1598,6 +1626,11 @@ public:
     virtual bool handleInput(u64 keysDown, u64 keysHeld, const HidTouchState& touchPos,
                              HidAnalogStickState joyStickPosLeft,
                              HidAnalogStickState joyStickPosRight) override {
+        if (g_shutdownRequested.load()) return true;
+        if (keysDown & HidNpadButton_B) {
+            beginSafeExit();
+            return true; // keep drawing until the worker's kernel signal fires
+        }
         // The account page has no visible entry point by design: + opens it, and
         // nothing on screen says so. The row it used to occupy cost a game slot,
         // and it is only needed once per console.
@@ -1666,6 +1699,7 @@ private:
 
         auto* total = new tsl::elm::ListItem(T(kPlayers), m_totalText);
         total->setClickListener([](u64 keys) {
+            if (g_shutdownRequested.load()) return true;
             if ((keys & HidNpadButton_A) != 0) {
                 g_refreshRequested = true;
                 // Raised here rather than in the thread: this runs on the frame
@@ -1696,6 +1730,7 @@ private:
             const std::vector<std::string> titleIds = j.titleIds;
             const int gamePlayers = j.players;
             item->setClickListener([this, gameName, titleIds, gamePlayers](u64 keys) {
+                if (g_shutdownRequested.load()) return true;
                 if ((keys & HidNpadButton_A) != 0) {
                     tsl::changeTo<LiveGui>(localisedName(gameName, titleIds), titleIds, gamePlayers);
                     return true;
@@ -1841,6 +1876,8 @@ public:
         fsdevMountSdmc();
         ensureDataDirs();
         loadRelayRoute();
+        recordNetworkTrace(g_relayRoute.enabled() ? "init route=relay host=" + g_relayRoute.host :
+                           g_relayRoute.error.empty() ? "init route=direct" : "init route=config-error");
 
         timeInitialize();
         nifmInitialize(NifmServiceType_User);
@@ -1881,33 +1918,20 @@ public:
         }
     }
     virtual void exitServices() override {
-        // This runs just before main() returns, and the process has to end for
-        // nx-ovlloader to come back. While it lives the overlay menu cannot be opened
-        // at all and the console needs a reboot, so nothing here may block
-        // indefinitely - an unclean teardown is the lesser problem, because the
-        // kernel releases every service and handle when the process exits anyway.
+        // Returning from an overlay does not exit the process: nx-ovlloader
+        // unmaps this NRO to load the menu in the same process. A live thread or
+        // its mapped stack can make .data/.bss unmapping fail (2347-0026).
         g_threadRunning = false;
-
-        // curl abandons an in-flight transfer within about a second of the flag going
-        // false (shutdownProgress). Wait that long, never longer.
-        for (int i = 0; i < 40 && g_threadActive.load(); ++i) {
-            svcSleepThread(25'000'000LL);   // 25 ms; one second in total
-        }
-
-        wipe(g_account.password);
-        wipe(g_account.token);
-
-        // Tear the services down only when the worker has actually stopped. Doing it
-        // while it is still inside libcurl can block, and a blocked exitServices() is
-        // what kept this process alive and the overlay menu shut.
-        if (g_threadActive.load()) return;
-
         if (g_pollThreadStarted) {
-            // The worker has returned, so this is immediate.
+            // Normal B exit already waited without blocking the GUI. This join
+            // also protects other exit paths; never unload after a timed wait.
             threadWaitForExit(&g_pollThread);
             threadClose(&g_pollThread);
             g_pollThreadStarted = false;
         }
+        wipe(g_account.password);
+        wipe(g_account.token);
+        wipe(g_relayRoute.key);
 
         curl_global_cleanup();
         socketExit();

@@ -37,5 +37,14 @@ int main() {
         "tcp_relay=999.168.1.2:443", "tcp_relay=192.168.01.2:443", "tcp_relay=host.example:443",
         "tcp_relay=192.168.1.2:443\nrelay_url=https://relay.example.com"}) assert(!parseRelayRoute(config).error.empty());
     assert(routeIpv4("127.0.0.1") && !routeIpv4("127.0.0.1.2") && !routeIpv4("1.2.3"));
+    auto dual = parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip=104.21.62.41\nrelay_ip_backup=172.67.219.244\nrelay_key=" + key);
+    auto two = selectRoute(dual, "https://nextendo.network/api/me", "nextendo.network", {});
+    assert((two.fallback == std::vector<std::string>{"104.21.62.41", "172.67.219.244"}));
+    assert(!routeNeedsDns(two, false) && !routeNeedsDns(two, true));
+    two.fallback.clear();
+    assert(routeNeedsDns(two, false) && !routeNeedsDns(two, true));
+    assert(!routeNeedsDns(tunnel, false));
+    assert(!parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip_backup=172.67.219.244\nrelay_key=" + key).error.empty());
+    assert(!parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip=104.21.62.41\nrelay_ip_backup=999.1.1.1\nrelay_key=" + key).error.empty());
     std::cout << "Relay routing checks passed\n";
 }

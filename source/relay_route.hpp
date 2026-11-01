@@ -5,7 +5,7 @@
 
 namespace nextendo {
 struct RelayRoute {
-    std::string host, ip, key, error, tcpIp, tcpPort;
+    std::string host, ip, key, error, tcpIp, tcpPort, backupIp;
     bool enabled() const { return !host.empty() && error.empty(); }
     bool tcpEnabled() const { return !tcpIp.empty() && error.empty(); }
 };
@@ -66,12 +66,13 @@ inline RelayRoute parseRelayRoute(const std::string& text) {
         seen.push_back(name);
         if (name == "relay_url") url = value;
         else if (name == "relay_ip") out.ip = value;
+        else if (name == "relay_ip_backup") out.backupIp = value;
         else if (name == "relay_key") out.key = value;
         else if (name == "tcp_relay") tcp = value;
         else return fail("unknown network.ini key");
     }
     if (!tcp.empty()) {
-        if (!url.empty() || !out.ip.empty() || !out.key.empty()) return fail("tcp_relay cannot be combined with relay_url, relay_ip or relay_key");
+        if (!url.empty() || !out.ip.empty() || !out.backupIp.empty() || !out.key.empty()) return fail("tcp_relay cannot be combined with HTTPS relay settings");
         const size_t colon = tcp.find(':');
         if (colon == std::string::npos) return fail("tcp_relay must be IPv4:port");
         out.tcpIp = tcp.substr(0, colon);
@@ -84,7 +85,7 @@ inline RelayRoute parseRelayRoute(const std::string& text) {
         return out;
     }
     if (url.empty()) {
-        if (!out.ip.empty() || !out.key.empty()) return fail("relay_url is required with relay_ip or relay_key");
+        if (!out.ip.empty() || !out.backupIp.empty() || !out.key.empty()) return fail("relay_url is required with relay addresses or key");
         return out; // empty configuration is direct mode
     }
     if (url.compare(0, 8, "https://") != 0) return fail("relay_url must use HTTPS");
@@ -94,6 +95,7 @@ inline RelayRoute parseRelayRoute(const std::string& text) {
     std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; });
     if (!routeHost(host)) return fail("relay_url must be a hostname on HTTPS port 443, with no path");
     if (!out.ip.empty() && !routeIpv4(out.ip)) return fail("relay_ip must be an IPv4 address");
+    if (!out.backupIp.empty() && (out.ip.empty() || !routeIpv4(out.backupIp))) return fail("relay_ip_backup requires relay_ip and a valid IPv4 address");
     if (out.key.size() < 32 || out.key.size() > 128 || out.key.find_first_not_of(
         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") != std::string::npos)
         return fail("relay_key must contain 32-128 letters, digits, dots, underscores or hyphens");
@@ -107,10 +109,16 @@ inline RequestRoute selectRoute(const RelayRoute& relay, const std::string& url,
     if (relay.tcpEnabled() && host == "nextendo.network" && url.compare(0, origin.size(), origin) == 0)
         return {url, host, {}, false, "nextendo.network:443:" + relay.tcpIp + ":" + relay.tcpPort};
     if (relay.enabled() && host == "nextendo.network" && url.compare(0, origin.size(), origin) == 0) {
+        std::vector<std::string> addresses;
+        if (!relay.ip.empty()) addresses.push_back(relay.ip);
+        if (!relay.backupIp.empty() && relay.backupIp != relay.ip) addresses.push_back(relay.backupIp);
         return {"https://" + relay.host + "/" + url.substr(origin.size()), relay.host,
-                relay.ip.empty() ? std::vector<std::string>{} : std::vector<std::string>{relay.ip}, true, ""};
+                addresses, true, ""};
     }
     return {url, host, fallback, false, ""};
+}
+inline bool routeNeedsDns(const RequestRoute& route, bool cached) {
+    return route.connectTo.empty() && !cached && !(route.relayed && !route.fallback.empty());
 }
 inline std::string relayLivePath(const RelayRoute& relay, const std::string& path,
                                 const std::vector<std::string>& titles) {

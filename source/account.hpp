@@ -21,6 +21,8 @@ struct AccountState {
     std::vector<std::string> wanted;
     std::vector<nextendo::LiveGame> games;
     AccountJob job = AccountJob::None;
+    AccountJob activeJob = AccountJob::None;
+    bool livePending = false;
     // There is no "remember me" control in the UI, so leaving this false meant the
     // token was never written and every boot asked for the account again. The
     // logout button still clears it, so a shared console can be signed out.
@@ -89,14 +91,34 @@ static void loadSession() {
 static void requestLive(const std::vector<std::string>& only = {}) {
     mutexLock(&g_mutex);
     g_account.wanted = only;
-    if (!g_account.token.empty() && !g_account.busy) {
-        g_account.job = AccountJob::Refresh;
+    if (!g_account.token.empty() && g_threadRunning.load()) {
+        if (g_account.activeJob == AccountJob::Refresh) ++g_account.epoch;
+        g_account.livePending = true;
+        if (!g_account.busy && g_account.job == AccountJob::None) {
+            g_account.job = AccountJob::Refresh;
+            g_account.livePending = false;
+        }
         g_account.busy = true;
         g_account.message.clear();
         ++g_account.revision;
         g_accountWake = true;
     }
     mutexUnlock(&g_mutex);
+}
+// Returning from a live page cancels only its fetch, not an account restore.
+// The worker keeps ownership of all CURL objects until it has unwound.
+static void cancelLive() {
+    mutexLock(&g_mutex);
+    g_account.livePending = false;
+    g_account.wanted.clear();
+    if (g_account.job == AccountJob::Refresh) g_account.job = AccountJob::None;
+    if (g_account.activeJob == AccountJob::Refresh) ++g_account.epoch;
+    g_account.games.clear();
+    g_account.fetchedTick = 0;
+    g_account.busy = g_account.activeJob != AccountJob::None || g_account.job != AccountJob::None;
+    ++g_account.revision;
+    mutexUnlock(&g_mutex);
+    g_accountWake = true;
 }
 static void logoutAccount() {
     mutexLock(&g_mutex);
@@ -109,6 +131,7 @@ static void logoutAccount() {
     g_account.games.clear();
     g_account.fetchedTick = 0;
     g_account.job = AccountJob::None;
+    g_account.livePending = false;
     g_account.busy = false;
     g_account.message = persistSession("") ? L("已退出登录", "Signed out")
         : L("已退出；请手动删除 SD 卡 session.txt", "Signed out; delete session.txt on SD");
@@ -243,6 +266,9 @@ static bool serviceAccount() {
     mutexLock(&g_mutex);
     const AccountJob job = g_account.job;
     if (job == AccountJob::None) { mutexUnlock(&g_mutex); return false; }
+    g_account.activeJob = job;
+    g_account.busy = true;
+    if (job == AccountJob::Refresh) g_account.livePending = false;
     const unsigned epoch = g_account.epoch;
     g_account.lastAttemptTick = armGetSystemTick();
     std::string token = g_account.token, login = g_account.login;
@@ -368,6 +394,7 @@ static bool serviceAccount() {
         if (job == AccountJob::Login && ok) {
             g_account.signedOut = false;
             g_account.token = token;
+            if (g_liveVisible.load() && !g_account.wanted.empty()) g_account.livePending = true;
             g_account.games.clear();
             g_account.fetchedTick = 0;
             const bool saved = persistSession(g_account.remember ? token : "");
@@ -379,14 +406,19 @@ static bool serviceAccount() {
             wipe(g_account.token);
             g_account.games.clear();
             g_account.fetchedTick = 0;
+            g_account.livePending = false;
             persistSession("");
         }
         g_account.message = message;
     }
-    // Cleared outside the epoch test on purpose. A logout while a request was in
-    // flight bumped the epoch, and leaving the flag set pinned the page on
-    // "refreshing" for the rest of the session.
-    g_account.busy = false;
+    g_account.activeJob = AccountJob::None;
+    if (g_threadRunning.load() && g_account.livePending && !g_account.token.empty() && g_account.job == AccountJob::None) {
+        g_account.job = AccountJob::Refresh;
+        g_account.livePending = false;
+        g_accountWake = true;
+    }
+    if (!g_threadRunning.load()) { g_account.job = AccountJob::None; g_account.livePending = false; }
+    g_account.busy = g_account.job != AccountJob::None;
     ++g_account.revision;
     mutexUnlock(&g_mutex);
     wipe(token);

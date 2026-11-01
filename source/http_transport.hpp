@@ -24,7 +24,7 @@ static void recordNetworkTrace(const std::string& line) {
     static std::vector<std::string> recent;
     recent.push_back(line.substr(0, 384));
     if (recent.size() > 24) recent.erase(recent.begin());
-    std::string text = "Nextendo transport v1.5.12; times in ms; no credentials or response bodies\n";
+    std::string text = "Nextendo transport v1.5.13; times in ms; no credentials or response bodies\n";
     for (const auto& entry : recent) text += entry + "\n";
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
@@ -50,19 +50,22 @@ static bool performOnHandle(CURL* curl, const std::string& originUrl, const std:
     const auto route = nextendo::selectRoute(g_relayRoute, originUrl, originHost, originFallback);
     const auto& host = route.host;
     const auto& url = route.url;
+    std::string path = url.substr(std::min(url.find('/', 8), url.size()));
+    const size_t query = path.find('?');
+    if (query != std::string::npos) path.resize(query);
+    if (bounded) recordNetworkTrace(host + path + " phase=prepare");
     const u64 start = armGetSystemTick();
     const auto cached = g_cachedIpByHost.find(host);
-    auto resolved = route.connectTo.empty() ? resolveHostIps(host) : std::vector<std::string>{};
-    // relay_ip is a preferred address, not a permanent lock: if it fails, try
-    // current DNS answers. A previously successful cached address comes first.
-    if (route.relayed && !route.fallback.empty()) resolved.insert(resolved.begin(), route.fallback.front());
+    const bool needsDns = nextendo::routeNeedsDns(route, cached != g_cachedIpByHost.end() && !cached->second.empty());
+    if (bounded && needsDns) recordNetworkTrace(host + path + " phase=DNS-start");
+    // A configured IP must actually bypass DNS. getaddrinfo() is synchronous
+    // on Switch, cannot be aborted by curl's progress callback, and was still
+    // executed before every request in 1.5.12 despite relay_ip being present.
+    auto resolved = needsDns ? resolveHostIps(host) : std::vector<std::string>{};
     const auto ips = !route.connectTo.empty() ? std::vector<std::string>{g_relayRoute.tcpIp} :
         nextendo::ipCandidates(cached == g_cachedIpByHost.end() ? "" : cached->second, resolved, route.fallback);
     const long dnsMs = static_cast<long>(armTicksToNs(armGetSystemTick() - start) / 1000000ULL);
     if (ips.empty()) { error = "DNS failed"; recordNetworkTrace(host + " DNS failed"); return false; }
-    std::string path = url.substr(std::min(url.find('/', 8), url.size()));
-    const size_t query = path.find('?');
-    if (query != std::string::npos) path.resize(query); // never log query values
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     if (route.relayed) curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
@@ -110,6 +113,7 @@ static bool performOnHandle(CURL* curl, const std::string& originUrl, const std:
         curl_easy_setopt(curl, CURLOPT_RESOLVE, resolve);
         curl_easy_setopt(curl, CURLOPT_CONNECT_TO, connect);
         if (relayHeaders) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, relayHeaders);
+        if (bounded) recordNetworkTrace(host + path + " phase=connect ip=" + ips[attempt]);
         const CURLcode code = curl_easy_perform(curl);
         long status = 0, requestBytes = 0;
         curl_off_t uploaded = 0;
@@ -134,8 +138,8 @@ static bool performOnHandle(CURL* curl, const std::string& originUrl, const std:
         }
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, static_cast<void*>(nullptr));
         const bool complete = sink.stopped && sink.frame.complete() && !sink.tooLarge;
-        const bool ok = code == CURLE_OK || (complete && status >= 200 &&
-            (code == CURLE_WRITE_ERROR || code == CURLE_OPERATION_TIMEDOUT || code == CURLE_PARTIAL_FILE));
+        const bool ok = !sink.tooLarge && (code == CURLE_OK || (complete && status >= 200 &&
+            (code == CURLE_WRITE_ERROR || code == CURLE_OPERATION_TIMEDOUT || code == CURLE_PARTIAL_FILE)));
         const char* stage = nextendo::transportStage(connected, tls, status, body.size());
         if (bounded || !ok) {
             char metrics[224];

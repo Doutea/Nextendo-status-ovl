@@ -30,9 +30,11 @@ static void fsFsClose(FsFileSystem*) {}
 static std::atomic<bool> g_threadRunning{true};
 static std::map<std::string, std::string> g_cachedIpByHost;
 static u64 clockMs = 0;
+static int dnsCalls = 0;
 static u64 armGetSystemTick() { return clockMs; }
 static u64 armTicksToNs(u64 tick) { return tick * 1000000; }
 static std::vector<std::string> resolveHostIps(const std::string& host) {
+    ++dnsCalls;
     return host == "relay.example.com" ? std::vector<std::string>{"104.21.62.41", "172.67.219.244"}
                                       : std::vector<std::string>{"104.21.84.82", "172.67.190.75"};
 }
@@ -133,7 +135,7 @@ extern "C" CURLcode curl_easy_perform(CURL* ptr) {
 }
 #include "../source/http_transport.hpp"
 static int accountCallback(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) { return 0; }
-static void reset() { replies.clear(); attempts.clear(); seenHeaders.clear(); g_cachedIpByHost.clear(); g_relayRoute = {}; clockMs = 0; g_threadRunning = true; }
+static void reset() { replies.clear(); attempts.clear(); seenHeaders.clear(); g_cachedIpByHost.clear(); g_relayRoute = {}; clockMs = 0; dnsCalls = 0; g_threadRunning = true; }
 int main() {
     using namespace nextendo;
     assert((ipCandidates("b", {"a", "b"}, {"b", "c", "d", "e"}) == std::vector<std::string>{"b", "a", "c", "d"}));
@@ -189,12 +191,13 @@ int main() {
     assert(!run() && attempts.size() == 1); // total budget, not per-IP full timeouts
     reset();
     const std::string relayKey(64, 'b');
-    g_relayRoute = parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip=104.21.62.41\nrelay_key=" + relayKey);
+    g_relayRoute = parseRelayRoute("relay_url=https://relay.example.com\nrelay_ip=104.21.62.41\nrelay_ip_backup=172.67.219.244\nrelay_key=" + relayKey);
     replies.push_back({CURLE_COULDNT_CONNECT, 0, "", 0, 0, 1000});
     replies.push_back({CURLE_OK, 200, R"({"counts":{}})"});
     assert(performOnHandle(curl, "https://nextendo.network/api/online-counts", "nextendo.network",
         {"104.21.84.82", "172.67.190.75"}, body, error));
     assert(c.url == "https://relay.example.com/api/online-counts");
+    assert(dnsCalls == 0); // explicit relay addresses must bypass blocking DNS
     assert((attempts == std::vector<std::string>{"104.21.62.41", "172.67.219.244"}));
     assert(g_cachedIpByHost.count("nextendo.network") == 0 && g_cachedIpByHost["relay.example.com"] == "172.67.219.244");
     assert(seenHeaders.size() == 2 && seenHeaders[0] == std::vector<std::string>{"X-Nextendo-Relay-Key: " + relayKey});
