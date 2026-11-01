@@ -19,6 +19,8 @@ dkp-pacman -S --needed --noconfirm switch-dev switch-portlibs
 cd "$(dirname "$0")/.."
 make clean >/dev/null 2>&1 || true
 
+python3 scripts/embed_relay.py
+
 echo "==> building"
 set +e
 make -j"$(nproc)" 2>&1 | tee /tmp/build.log

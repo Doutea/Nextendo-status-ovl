@@ -1,8 +1,12 @@
 #pragma once
 #include "relay_route.hpp"
-// Set once before the worker starts. Never embed a private relay key in source.
+#include "relay_defaults.hpp"
+// Set once before the worker starts. Build-time credentials stay out of git.
 static nextendo::RelayRoute g_relayRoute;
 static void loadRelayRoute() {
+    // Missing SD override uses the compiled default. An existing empty file
+    // explicitly selects direct mode; malformed overrides remain visible errors.
+    g_relayRoute = nextendo::embeddedRelayRoute();
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
     FsFile file{};

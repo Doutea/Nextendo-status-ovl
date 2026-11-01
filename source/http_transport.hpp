@@ -24,7 +24,7 @@ static void recordNetworkTrace(const std::string& line) {
     static std::vector<std::string> recent;
     recent.push_back(line.substr(0, 384));
     if (recent.size() > 24) recent.erase(recent.begin());
-    std::string text = "Nextendo transport v1.5.13; times in ms; no credentials or response bodies\n";
+    std::string text = "Nextendo transport v1.6.2; times in ms; no credentials or response bodies\n";
     for (const auto& entry : recent) text += entry + "\n";
     FsFileSystem fs{};
     if (R_FAILED(fsOpenSdCardFileSystem(&fs))) return;
